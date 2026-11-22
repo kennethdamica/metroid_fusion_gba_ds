@@ -1,0 +1,100 @@
+--- a/code/bootstrap/arm9/source/main.cpp
++++ b/code/bootstrap/arm9/source/main.cpp
+@@ -9,6 +9,7 @@
+ #include "threeGlow.h"
+ #include "splashBg.h"
+ #include "runner.h"
++#include "Package.h"
+ #include "../../../core/common/IpcChannels.h"
+ #include "../../../core/common/FsIpcCommand.h"
+ 
+@@ -81,7 +82,8 @@
+     rtos_ackIrqMask(~0u);
+ 
+     initIpc();
+-    tryInitDldi();
++    const bool storageReady = tryInitDldi();
++    packagePrepare(argc > 0 ? argv[0] : nullptr, storageReady);
+ 
+     mem_setVramAMapping(MEM_VRAM_AB_LCDC);
+     mem_setVramBMapping(MEM_VRAM_AB_LCDC);
+@@ -95,7 +97,8 @@
+     IC_InvalidateAll();
+     dmaCopyHalfWords(3, gbarunner9_bin, (void*)0x06800000, gbarunner9_bin_size);
+ 
+-    ((gbarunner9_func_t)0x06800000)(argc, argv);
++    char** packageArgs = packageHandoff();
++    ((gbarunner9_func_t)0x06800000)(5, packageArgs);
+ 
+     return 0;
+ }
+--- a/code/bootstrap/arm9/Makefile
++++ b/code/bootstrap/arm9/Makefile
+@@ -16,7 +16,7 @@
+ #---------------------------------------------------------------------------------
+ BUILD		:=	build
+ SOURCES		:=	source
+-INCLUDES	:=	include source
++INCLUDES	:=	include source ../../../core/common
+ DATA		:=  data
+ GRAPHICS    :=  gfx
+ 
+--- a/code/core/arm9/source/main.cpp
++++ b/code/core/arm9/source/main.cpp
+@@ -122,10 +122,10 @@
+     return true;
+ }
+ 
+-static void loadGbaBios()
++static void loadGbaBios(const char* path)
+ {
+     memset(&gFile, 0, sizeof(gFile));
+-    f_open(&gFile, BIOS_FILE_PATH, FA_OPEN_EXISTING | FA_READ);
++    f_open(&gFile, path, FA_OPEN_EXISTING | FA_READ);
+     UINT br;
+     f_read(&gFile, gGbaBios, 16 * 1024, &br);
+     f_close(&gFile);
+@@ -476,10 +476,10 @@
+     // if (Environment::SupportsAgbSemihosting())
+         // mountAgbSemihosting();
+ 
+-    gAppSettingsService.TryLoadAppSettings(SETTINGS_FILE_PATH);
++    gAppSettingsService.TryLoadAppSettings(argc > 3 ? argv[3] : SETTINGS_FILE_PATH);
+ 
+     patch_resetSwiPatches();
+-    loadGbaBios();
++    loadGbaBios(argc > 2 ? argv[2] : BIOS_FILE_PATH);
+     relocateGbaBios();
+     applyBiosVmPatches();
+     const char* romPath = argc > 1 ? argv[1] : DEFAULT_ROM_FILE_PATH;
+@@ -490,8 +490,8 @@
+     char* romExtension = strrchr(savePath.get(), '.');
+     if (!romExtension) romExtension = savePath.get() + strlen(savePath.get());
+     strcpy(romExtension, ".sav");
+-    loadGameSpecificSettings();
+-    handleSave(savePath.get());
++    if (argc <= 3) loadGameSpecificSettings();
++    handleSave(argc > 4 ? argv[4] : savePath.get());
+     SelfModifyingPatches().ApplyPatches(gAppSettingsService.GetAppSettings().runSettings);
+ 
+     waitSplashScreenAnimation();
+--- a/code/core/arm7/source/IpcServices/FsIpcService.cpp
++++ b/code/core/arm7/source/IpcServices/FsIpcService.cpp
+@@ -19,6 +19,17 @@
+     auto cmd = reinterpret_cast<const fs_ipc_cmd_t*>(data << 2);
+     switch (cmd->cmd)
+     {
++        // Bootstrap-only commands return the actual device result.
++        case 5:
++        case 6:
++        {
++            bool ok = cmd->cmd == 5
++                ? _DLDI_readSectors_ptr(cmd->sector, cmd->count, cmd->buffer)
++                : _DLDI_writeSectors_ptr(cmd->sector, cmd->count, cmd->buffer);
++            const_cast<fs_ipc_cmd_t*>(cmd)->count = ok ? 1 : 0;
++            ipc_setArm7SyncBits(ipc_getArm9SyncBits());
++            break;
++        }
+         case FS_IPC_CMD_DLDI_SETUP:
+         {
+             SetupDldi(cmd);

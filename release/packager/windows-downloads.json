@@ -1,0 +1,44 @@
+{
+  "python": {
+    "filename": "python.3.13.7.nupkg",
+    "url": "https://api.nuget.org/v3-flatcontainer/python/3.13.7/python.3.13.7.nupkg",
+    "sha256": "e74272a824e23702dfb5f3e11c3660ceabac7487e3366d4551391db5cd762853"
+  },
+  "wheels": [
+    {
+      "requirement": "altgraph==0.17.5",
+      "filename": "altgraph-0.17.5-py2.py3-none-any.whl",
+      "sha256": "f3a22400bce1b0c701683820ac4f3b159cd301acab067c51c653e06961600597"
+    },
+    {
+      "requirement": "packaging==26.3",
+      "filename": "packaging-26.3-py3-none-any.whl",
+      "sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c"
+    },
+    {
+      "requirement": "pefile==2024.8.26",
+      "filename": "pefile-2024.8.26-py3-none-any.whl",
+      "sha256": "76f8b485dcd3b1bb8166f1128d395fa3d87af26360c2358fb75b80019b957c6f"
+    },
+    {
+      "requirement": "pyinstaller==6.22.3",
+      "filename": "pyinstaller-6.22.3-py3-none-win_amd64.whl",
+      "sha256": "500bd58c7bf7e584a8435adccbd763a0b918d5c12b08d74ff50fd79b2915458b"
+    },
+    {
+      "requirement": "pyinstaller-hooks-contrib==2026.10",
+      "filename": "pyinstaller_hooks_contrib-2026.10-py3-none-any.whl",
+      "sha256": "dfc3cde20a7ce6c92e803016e66eed4b7050467e2c5f886a3745d89b258c6d6d"
+    },
+    {
+      "requirement": "pywin32-ctypes==0.2.3",
+      "filename": "pywin32_ctypes-0.2.3-py3-none-any.whl",
+      "sha256": "8a1513379d709975552d202d942d9837758905c8d01eb82b8bcc30918929e7b8"
+    },
+    {
+      "requirement": "setuptools==84.2.1",
+      "filename": "setuptools-84.2.1-py3-none-any.whl",
+      "sha256": "ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2"
+    }
+  ]
+}

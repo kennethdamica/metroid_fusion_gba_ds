@@ -1,0 +1,28 @@
+diff --git a/src/libretro/core/core.cpp b/src/libretro/core/core.cpp
+index df32f07..0be079b 100644
+--- a/src/libretro/core/core.cpp
++++ b/src/libretro/core/core.cpp
+@@ -1123,7 +1123,7 @@ void MelonDsDs::CoreState::RegisterMemoryMap() const noexcept {
+     size_t mainRamSize = GetMemorySize(RETRO_MEMORY_SYSTEM_RAM);
+     retro_assert(mainRamSize != 0);
+ 
+-    std::array<retro_memory_descriptor, 3> descriptors = {};
++    std::array<retro_memory_descriptor, 4> descriptors = {};
+ 
+     retro_memory_descriptor& mainRam = descriptors[0];
+     mainRam.flags = RETRO_MEMDESC_SYSTEM_RAM;
+@@ -1156,6 +1156,14 @@ void MelonDsDs::CoreState::RegisterMemoryMap() const noexcept {
+     dtcm.len = melonDS::DTCMPhysicalSize;
+     dtcm.addrspace = nullptr;
+ 
++    // Project diagnostic view: physical 32 KiB shared WRAM, independent of
++    // which CPU currently owns it. This is a pseudo-address, not a DS bus mapping.
++    retro_memory_descriptor& shared = descriptors[3];
++    shared.flags = RETRO_MEMDESC_SYSTEM_RAM;
++    shared.ptr = Console->SharedWRAM;
++    shared.start = 0x0F000000;
++    shared.len = Console->SharedWRAMSize;
++
+     std::span<const retro_memory_descriptor> memoryMap(descriptors.data(), descriptors.size());
+     if (!retro::set_memory_maps(memoryMap)) {
+         // Not fatal; the frontend can still reach main RAM through retro_get_memory_data.

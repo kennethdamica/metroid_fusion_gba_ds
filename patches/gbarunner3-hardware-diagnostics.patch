@@ -1,0 +1,205 @@
+--- a/code/core/arm9/source/main.cpp
++++ b/code/core/arm9/source/main.cpp
+@@ -46,6 +46,8 @@
+ #include "VirtualMachine/VMUndefinedArmTable.h"
+ #include "arm9Clock.h"
+ #include "Application/FusionScreen.h"
++void fusionBootStage(u32 stage);
++[[noreturn]] void fusionBootFail(u32 stage);
+ 
+ #define DEFAULT_ROM_FILE_PATH           "/rom.gba"
+ #define BIOS_FILE_PATH                  "/_gba/bios.bin"
+@@ -125,9 +127,9 @@
+ static void loadGbaBios(const char* path)
+ {
+     memset(&gFile, 0, sizeof(gFile));
+-    f_open(&gFile, path, FA_OPEN_EXISTING | FA_READ);
++    if (f_open(&gFile, path, FA_OPEN_EXISTING | FA_READ) != FR_OK) fusionBootFail(0xE1);
+     UINT br;
+-    f_read(&gFile, gGbaBios, 16 * 1024, &br);
++    if (f_read(&gFile, gGbaBios, 16 * 1024, &br) != FR_OK || br != 16 * 1024) fusionBootFail(0xE2);
+     f_close(&gFile);
+ }
+ 
+@@ -192,11 +194,11 @@
+ {
+     UINT br;
+     memset(&gFile, 0, sizeof(gFile));
+-    f_open(&gFile, romPath, FA_OPEN_EXISTING | FA_READ);
++    if (f_open(&gFile, romPath, FA_OPEN_EXISTING | FA_READ) != FR_OK) fusionBootFail(0xE3);
+     sdc_init();
+-    f_read(&gFile, &gRomHeader, sizeof(GbaHeader), &br);
++    if (f_read(&gFile, &gRomHeader, sizeof(GbaHeader), &br) != FR_OK || br != sizeof(GbaHeader)) fusionBootFail(0xE4);
+     f_lseek(&gFile, ROM_LINEAR_GBA_ADDRESS - 0x08000000);
+-    f_read(&gFile, (void*)ROM_LINEAR_DS_ADDRESS, ROM_LINEAR_SIZE, &br);
++    if (f_read(&gFile, (void*)ROM_LINEAR_DS_ADDRESS, ROM_LINEAR_SIZE, &br) != FR_OK || br != ROM_LINEAR_SIZE) fusionBootFail(0xE5);
+ 
+     HarvestMoonPatches().TryApplyPatches(gRomHeader.gameCode);
+     if (BadMixerPatch().TryApplyPatch())
+@@ -405,6 +407,7 @@
+ 
+     rtos_setIrqMask(RTOS_IRQ_VBLANK);
+     rtos_ackIrqMask(~0u);
++    fusionBootStage(0x15);
+     REG_IME = 1;
+     gfx_setVBlankIrqEnabled(true);
+     arm_enableIrqs();
+@@ -454,13 +457,19 @@
+     sys_set3DGeometryEnginePower(true); // enable geometry engine to generate gx fifo irq
+     REG_GXSTAT = 0; // gx fifo irqs must be off
+ 
++    fusionBootStage(1);
+     Environment::Initialize();
++    fusionBootStage(0x12);
+     setupLogger();
+ 
++    fusionBootStage(0x13);
+     mem_setMainMemoryPriority(EXMEMCNT_MAIN_MEM_PRIO_ARM7);
+ 
++    fusionBootStage(0x14);
+     startSplashScreenAnimation();
+-
++    fusionBootStage(0x16);
++
++    fusionBootStage(2);
+     bool mountResult;
+     if (shouldMountDsiSd(argc, argv))
+         mountResult = mountDsiSd();
+@@ -469,6 +478,7 @@
+ 
+     if (!mountResult)
+     {
++        fusionBootFail(0xE0);
+         GFX_PLTT_BG_MAIN[0] = 0x1F << 10;
+         while (1);
+     }
+@@ -476,13 +486,16 @@
+     // if (Environment::SupportsAgbSemihosting())
+         // mountAgbSemihosting();
+ 
++    fusionBootStage(3);
+     gAppSettingsService.TryLoadAppSettings(argc > 3 ? argv[3] : SETTINGS_FILE_PATH);
+ 
+     patch_resetSwiPatches();
++    fusionBootStage(4);
+     loadGbaBios(argc > 2 ? argv[2] : BIOS_FILE_PATH);
+     relocateGbaBios();
+     applyBiosVmPatches();
+     const char* romPath = argc > 1 ? argv[1] : DEFAULT_ROM_FILE_PATH;
++    fusionBootStage(5);
+     loadGbaRom(romPath);
+     // Save paths live in writable main RAM; never modify argv or a VRAM literal.
+     auto savePath = std::make_unique<char[]>(strlen(romPath) + 5);
+@@ -491,14 +504,18 @@
+     if (!romExtension) romExtension = savePath.get() + strlen(savePath.get());
+     strcpy(romExtension, ".sav");
+     if (argc <= 3) loadGameSpecificSettings();
++    fusionBootStage(6);
+     handleSave(argc > 4 ? argv[4] : savePath.get());
++    fusionBootStage(7);
+     SelfModifyingPatches().ApplyPatches(gAppSettingsService.GetAppSettings().runSettings);
+ 
++    fusionBootStage(8);
+     waitSplashScreenAnimation();
+     stopSplashScreenAnimation();
+     delete sSplashScreen;
+     sSplashScreen = nullptr;
+ 
++    fusionBootStage(9);
+     const bool dualScreen = fusionScreenSupports(gRomHeader);
+     auto displaySettings = gAppSettingsService.GetAppSettings().displaySettings;
+     if (dualScreen)
+@@ -512,6 +529,7 @@
+         gGbaBorderService.SetupBorder(displaySettings.borderImage, gRomHeader.gameCode);
+     }
+ 
++    fusionBootStage(0xA);
+     // Do not clear ewram before we read argv
+     memset((void*)0x02000000, 0, 256 * 1024);
+     memset((void*)0x03000000, 0, 32 * 1024);
+@@ -527,11 +545,13 @@
+     dc_flushRange((void*)ROM_LINEAR_DS_ADDRESS, ROM_LINEAR_SIZE);
+     dc_flushRange(gGbaBios, sizeof(gGbaBios));
+     ic_invalidateAll();
++    fusionBootStage(0xB);
+     setupWramInstructionCache();
+     setupRomInstructionCache();
+     setupIWramDataCache();
+     setupEWramDataCache();
+     setupArm9Clock();
++    fusionBootStage(0xC);
+     if (dualScreen) fusionScreenInitialize();
+ 
+     rtos_setIrqMask(RTOS_IRQ_VBLANK);
+--- a/code/core/arm9/source/Core/Environment.cpp
++++ b/code/core/arm9/source/Core/Environment.cpp
+@@ -1,6 +1,8 @@
+ #include "common.h"
+ #include <libtwl/mem/memExtern.h>
+ #include "Environment.h"
++
++void fusionBootStage(u32 stage);
+ 
+ u32 Environment::_flags;
+ 
+@@ -23,8 +25,14 @@
+ 
+ void Environment::Initialize()
+ {
++    fusionBootStage(0x17);
+     _flags = ENVIRONMENT_FLAGS_NONE;
+-    if (((*(vu32*)0x04004000) & 3) == 1)
++    fusionBootStage(0x18);
++    // SCFG_A9ROM is a 16-bit register. Match the successful mode read used
++    // by the startup screen instead of reading the adjacent reserved halfword.
++    const u16 biosMode = *(vu16*)0x04004000;
++    fusionBootStage(0x19);
++    if ((biosMode & 3) == 1)
+     {
+         _flags |= ENVIRONMENT_FLAGS_DSI_MODE;
+     }
+@@ -45,8 +53,10 @@
+                 _flags |= ENVIRONMENT_FLAGS_AGB_SEMIHOSTING;
+         }
+     }
++    fusionBootStage(0x10);
+     if (!(_flags & ENVIRONMENT_FLAGS_IS_NITRO_EMULATOR))
+     {
++        fusionBootStage(0x11);
+         if (detectNocashPrintSuppport())
+             _flags |= ENVIRONMENT_FLAGS_NOCASH_PRINT;
+     }
+--- a/code/core/arm9/gbarunner9.ld
++++ b/code/core/arm9/gbarunner9.ld
+@@ -64,10 +64,10 @@
+ 
+ 	.rodata :
+ 	{
+-		*(EXCLUDE_FILE(FusionScreen.size.o ColorProfiles.o JsonAppSettingsSerializer.o SaveTagScanner.o) .rodata)
++		*(EXCLUDE_FILE(FusionScreen.size.o ColorProfiles.o JsonAppSettingsSerializer.o SaveTagScanner.o main.o) .rodata)
+ 		*all.rodata*(*)
+ 		*(.roda)
+-		*(EXCLUDE_FILE(FusionScreen.size.o ColorProfiles.o JsonAppSettingsSerializer.o SaveTagScanner.o) .rodata.*)
++		*(EXCLUDE_FILE(FusionScreen.size.o ColorProfiles.o JsonAppSettingsSerializer.o SaveTagScanner.o main.o) .rodata.*)
+ 		*(.gnu.linkonce.r*)
+ 		SORT(CONSTRUCTORS)
+ 		. = ALIGN(4);   /* REQUIRED. LD is flaky without it. */
+@@ -253,6 +253,7 @@
+ 	    *ColorProfiles.o(.rodata .rodata.*)
+ 	    *JsonAppSettingsSerializer.o(.rodata .rodata.*)
+ 	    *SaveTagScanner.o(.rodata .rodata.*)
++	    *main.o(.rodata .rodata.*)
+ 	    *(.ewram)
+ 	    . = ALIGN(4);    /* REQUIRED. LD is flaky without it. */
+ 	    __ewram_end = ABSOLUTE(.);
+--- a/code/core/arm9/source/Application/GbaDisplayConfigurationService.cpp
++++ b/code/core/arm9/source/Application/GbaDisplayConfigurationService.cpp
+@@ -104,7 +104,7 @@
+         else
+             sys_setMainEngineToTopScreen();
+         sysipc_setTopBacklight(true);
+-        sysipc_setBottomBacklight(false);
++        sysipc_setBottomBacklight(true);
+     }
+     else
+     {

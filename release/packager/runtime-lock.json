@@ -1,0 +1,12 @@
+{
+  "name": "Fusion Hardware Test 5",
+  "package_abi": 1,
+  "template_sha256": "95cc5a93b9a4b529635259c239197f6d332fe6ec9e756a8a8a4317da655e5200",
+  "reference_package_sha256": "245d9b92dffb48f854a9e2bd0f466c03b3f217c4f540950a5a284a6d12fd8505",
+  "source_runtime": "artifacts/hardware-runtime",
+  "evidence": [
+    "artifacts/screen-framing-dev/test2/first-boot/result.json",
+    "artifacts/screen-framing-dev/test2/result.json",
+    "artifacts/screen-framing-dev/sectors-verified/result.json"
+  ]
+}

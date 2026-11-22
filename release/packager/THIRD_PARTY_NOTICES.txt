@@ -1,0 +1,70 @@
+Runtime provenance
+==================
+GBARunner3 by Gericom and contributors
+https://github.com/Gericom/GBARunner3
+Pinned commit: ecaa817815d9761745606592f04affe5ee9c3731
+Modified by this project; exact modifications are listed in build.json and
+the bundled runtime manifest. No project-wide license was found in the pinned
+source checkout or repository root. Redistribution permission is unresolved.
+
+libtwl
+https://github.com/Gericom/libtwl
+Pinned commit: e069645bed14a93e149e873e9273f04851e3a04e
+The pinned checkout predates the zlib license added by Gericom in commit
+81ad90ceca20be0bdaf5bbfab80b3ad796201510 (2024-09-25). Current upstream is
+zlib-licensed; coverage of this older pin has not been established. This status remains
+documented; no retroactive permission is asserted here.
+
+FatFs R0.13c
+Copyright (C) 2018, ChaN, all right reserved.
+
+FatFs module is an open source software. Redistribution and use of FatFs in
+source and binary forms, with or without modification, are permitted provided
+that the following condition is met:
+
+1. Redistributions of source code must retain the above copyright notice,
+   this condition and the following disclaimer.
+
+This software is provided by the copyright holder and contributors "AS IS"
+and any warranties related to this software are DISCLAIMED.
+The copyright owner or contributors be NOT LIABLE for any damages caused
+by use of this software.
+
+Host executable
+===============
+Python: https://www.python.org/ — PSF license and bundled dependency notices.
+PyInstaller: https://pyinstaller.org/ — GPL with the bootloader distribution
+exception. Its license and available Python/package notices accompany this
+preview under licenses/. PyInstaller build tools are not DS runtime code.
+
+Collected third-party notices
+=============================
+The following files accompany refreshed distributions under licenses/:
+
+libnds 1.8.3: libnds-zlib.txt
+libtwl later-license reference: libtwl-zlib.txt (older-pin scope above)
+FatFs R0.13c: fatfs.txt
+TLSF 3.1, Matthew Conte: tlsf-bsd.txt
+mini-printf, Michal Ludvig: mini-printf-bsd.txt
+ArduinoJson 6.20.1, Benoit Blanchon: arduinojson-mit.txt
+SD/MMC code, profi200: sdmmc-mit.txt
+metroidret/mf reference attribution: metroidret-mit.txt
+OpenSSL Apache 2.0 text: openssl-apache-2.0.txt
+XZ Utils/liblzma licensing summary: xz-copying.txt
+mpdecimal notice: mpdecimal-bsd.txt
+Python and available build-package notices retain their existing filenames.
+
+GPL-3.0.txt accompanies the separately published melonDS patch source. The
+standalone packager does not embed melonDS. Source patch attribution and
+modification dates are in patches/README.md in the repository.
+
+This is a best-effort notice collection, not a completed dependency audit or
+a blanket license grant. Linked toolchain runtime members, exact native-library
+notice coverage and applicable Microsoft redistribution conditions still need
+review. Python's Windows license includes additional Microsoft conditions.
+See docs/licensing-review.md and licenses/README.md in the source repository
+for provenance and scope. No Nintendo ROM or BIOS is licensed by these notices.
+
+Nintendo, Game Boy Advance and Metroid are trademarks of their owners. This
+project is independent. Game and BIOS files are supplied locally by the user
+and are excluded from the executable and distribution archive.

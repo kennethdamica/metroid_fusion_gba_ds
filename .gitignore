@@ -1,0 +1,51 @@
+# Downloaded dependencies, local environments and generated outputs
+/vendor/
+/.tools/
+/.venv/
+/artifacts/
+/fixtures/local/
+**/build/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Game/firmware inputs, saves, memory dumps and distribution binaries
+# Keep these excluded at any depth, not just the repository root.
+*.[gG][bB][aA]
+*.[nN][dD][sS]
+*.[bB][iI][nN]
+*.[rR][oO][mM]
+*.[sS][aA][vV]
+*.srm
+*.dsv
+*.state
+*.state.*
+*.dump
+*.ram
+*.img
+*.iso
+*.zip
+*.7z
+*.tar
+*.gz
+*.exe
+*.dll
+*.dylib
+*.elf
+*.o
+*.map
+*.log
+
+# Editor, host and local assistant state
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+.codex/
+.agents/
+.env
+.env.*
+*.pem
+*.key

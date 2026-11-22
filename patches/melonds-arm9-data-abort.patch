@@ -1,0 +1,574 @@
+diff --git a/src/ARM.cpp b/src/ARM.cpp
+index 3937a994..5b9c36c7 100644
+--- a/src/ARM.cpp
++++ b/src/ARM.cpp
+@@ -572,7 +572,15 @@ void ARMv5::PrefetchAbort()
+ 
+ void ARMv5::DataAbort()
+ {
+-    Log(LogLevel::Warn, "ARM9: data abort (%08X)\n", R[15]);
++    // A fault ends the current instruction before load results or writeback.
++    DataAbortTaken = true;
++    if (UserBankTransfer)
++    {
++        UpdateMode((CPSR & ~0x1F) | 0x10, CPSR, true);
++        UserBankTransfer = false;
++    }
++    // ARM946E-S implements the base-restored data-abort model.
++    R[AbortBaseRegister] = AbortBaseValue;
+ 
+     u32 oldcpsr = CPSR;
+     CPSR &= ~0xBF;
+@@ -657,6 +665,7 @@ void ARMv5::Execute()
+         else
+ #endif
+         {
++            DataAbortTaken = false;
+             if (CPSR & 0x20) // THUMB
+             {
+                 if constexpr (mode == CPUExecuteMode::InterpreterGDB)
+@@ -671,6 +680,15 @@ void ARMv5::Execute()
+ 
+                 // actually execute
+                 u32 icode = (CurInstr >> 6) & 0x3FF;
++                if ((CurInstr & 0xF600) == 0xB400 || (CurInstr & 0xF000) == 0x9000)
++                    AbortBaseRegister = 13;
++                else if ((CurInstr & 0xF000) == 0xC000)
++                    AbortBaseRegister = (CurInstr >> 8) & 7;
++                else if ((CurInstr & 0xF800) == 0x4800)
++                    AbortBaseRegister = 15;
++                else
++                    AbortBaseRegister = (CurInstr >> 3) & 7;
++                AbortBaseValue = R[AbortBaseRegister];
+                 ARMInterpreter::THUMBInstrTable[icode](this);
+             }
+             else
+@@ -688,6 +706,8 @@ void ARMv5::Execute()
+                 if (CheckCondition(CurInstr >> 28))
+                 {
+                     u32 icode = ((CurInstr >> 4) & 0xF) | ((CurInstr >> 16) & 0xFF0);
++                    AbortBaseRegister = (CurInstr >> 16) & 15;
++                    AbortBaseValue = R[AbortBaseRegister];
+                     ARMInterpreter::ARMInstrTable[icode](this);
+                 }
+                 else if ((CurInstr & 0xFE000000) == 0xFA000000)
+diff --git a/src/ARM.h b/src/ARM.h
+index 88f970ba..d7fa8a85 100644
+--- a/src/ARM.h
++++ b/src/ARM.h
+@@ -178,6 +178,10 @@ public:
+     u32 R_ABT[3];
+     u32 R_IRQ[3];
+     u32 R_UND[3];
++    bool DataAbortTaken = false;
++    bool UserBankTransfer = false;
++    u32 AbortBaseRegister = 0;
++    u32 AbortBaseValue = 0;
+     u32 CurInstr;
+     u32 NextInstr[2];
+ 
+diff --git a/src/ARMInterpreter_LoadStore.cpp b/src/ARMInterpreter_LoadStore.cpp
+index e36c5471..ab229bb0 100644
+--- a/src/ARMInterpreter_LoadStore.cpp
++++ b/src/ARMInterpreter_LoadStore.cpp
+@@ -23,6 +23,13 @@
+ namespace melonDS::ARMInterpreter
+ {
+ 
++// ARM946 CP15 control.L4 disables load-to-PC interworking. BX/BLX and
++// exception returns still select state explicitly; ARM7 always uses v4T rules.
++static bool LoadPCInterworks(const ARM* cpu)
++{
++    return cpu->Num == 0 && !(static_cast<const ARMv5*>(cpu)->CP15Control & (1u << 15));
++}
++
+ 
+ // copypasta from ALU. bad
+ #define LSL_IMM(x, s) \
+@@ -66,6 +73,7 @@ namespace melonDS::ARMInterpreter
+     if (((cpu->CurInstr>>12) & 0xF) == 0xF) \
+         storeval += 4; \
+     cpu->DataWrite32(offset, storeval); \
++    if (cpu->DataAbortTaken) return; \
+     if (cpu->CurInstr & (1<<21)) cpu->R[(cpu->CurInstr>>16) & 0xF] = offset; \
+     cpu->AddCycles_CD();
+ 
+@@ -76,12 +84,14 @@ namespace melonDS::ARMInterpreter
+     if (((cpu->CurInstr>>12) & 0xF) == 0xF) \
+         storeval += 4; \
+     cpu->DataWrite32(addr, storeval); \
++    if (cpu->DataAbortTaken) return; \
+     cpu->R[(cpu->CurInstr>>16) & 0xF] += offset; \
+     cpu->AddCycles_CD();
+ 
+ #define A_STRB \
+     offset += cpu->R[(cpu->CurInstr>>16) & 0xF]; \
+     cpu->DataWrite8(offset, cpu->R[(cpu->CurInstr>>12) & 0xF]); \
++    if (cpu->DataAbortTaken) return; \
+     if (cpu->CurInstr & (1<<21)) cpu->R[(cpu->CurInstr>>16) & 0xF] = offset; \
+     cpu->AddCycles_CD();
+ 
+@@ -89,18 +99,20 @@ namespace melonDS::ARMInterpreter
+ #define A_STRB_POST \
+     u32 addr = cpu->R[(cpu->CurInstr>>16) & 0xF]; \
+     cpu->DataWrite8(addr, cpu->R[(cpu->CurInstr>>12) & 0xF]); \
++    if (cpu->DataAbortTaken) return; \
+     cpu->R[(cpu->CurInstr>>16) & 0xF] += offset; \
+     cpu->AddCycles_CD();
+ 
+ #define A_LDR \
+     offset += cpu->R[(cpu->CurInstr>>16) & 0xF]; \
+     u32 val; cpu->DataRead32(offset, &val); \
++    if (cpu->DataAbortTaken) return; \
+     val = ROR(val, ((offset&0x3)<<3)); \
+     if (cpu->CurInstr & (1<<21)) cpu->R[(cpu->CurInstr>>16) & 0xF] = offset; \
+     cpu->AddCycles_CDI(); \
+     if (((cpu->CurInstr>>12) & 0xF) == 15) \
+     { \
+-        if (cpu->Num==1) val &= ~0x1; \
++        if (!LoadPCInterworks(cpu)) val &= ~0x1; \
+         cpu->JumpTo(val); \
+     } \
+     else \
+@@ -112,12 +124,13 @@ namespace melonDS::ARMInterpreter
+ #define A_LDR_POST \
+     u32 addr = cpu->R[(cpu->CurInstr>>16) & 0xF]; \
+     u32 val; cpu->DataRead32(addr, &val); \
++    if (cpu->DataAbortTaken) return; \
+     val = ROR(val, ((addr&0x3)<<3)); \
+     cpu->R[(cpu->CurInstr>>16) & 0xF] += offset; \
+     cpu->AddCycles_CDI(); \
+     if (((cpu->CurInstr>>12) & 0xF) == 15) \
+     { \
+-        if (cpu->Num==1) val &= ~0x1; \
++        if (!LoadPCInterworks(cpu)) val &= ~0x1; \
+         cpu->JumpTo(val); \
+     } \
+     else \
+@@ -128,6 +141,7 @@ namespace melonDS::ARMInterpreter
+ #define A_LDRB \
+     offset += cpu->R[(cpu->CurInstr>>16) & 0xF]; \
+     u32 val; cpu->DataRead8(offset, &val); \
++    if (cpu->DataAbortTaken) return; \
+     if (cpu->CurInstr & (1<<21)) cpu->R[(cpu->CurInstr>>16) & 0xF] = offset; \
+     cpu->AddCycles_CDI(); \
+     cpu->R[(cpu->CurInstr>>12) & 0xF] = val; \
+@@ -137,6 +151,7 @@ namespace melonDS::ARMInterpreter
+ #define A_LDRB_POST \
+     u32 addr = cpu->R[(cpu->CurInstr>>16) & 0xF]; \
+     u32 val; cpu->DataRead8(addr, &val); \
++    if (cpu->DataAbortTaken) return; \
+     cpu->R[(cpu->CurInstr>>16) & 0xF] += offset; \
+     cpu->AddCycles_CDI(); \
+     cpu->R[(cpu->CurInstr>>12) & 0xF] = val; \
+@@ -226,12 +241,14 @@ A_IMPLEMENT_WB_LDRSTR(LDRB)
+ #define A_STRH \
+     offset += cpu->R[(cpu->CurInstr>>16) & 0xF]; \
+     cpu->DataWrite16(offset, cpu->R[(cpu->CurInstr>>12) & 0xF]); \
++    if (cpu->DataAbortTaken) return; \
+     if (cpu->CurInstr & (1<<21)) cpu->R[(cpu->CurInstr>>16) & 0xF] = offset; \
+     cpu->AddCycles_CD();
+ 
+ #define A_STRH_POST \
+     u32 addr = cpu->R[(cpu->CurInstr>>16) & 0xF]; \
+     cpu->DataWrite16(addr, cpu->R[(cpu->CurInstr>>12) & 0xF]); \
++    if (cpu->DataAbortTaken) return; \
+     cpu->R[(cpu->CurInstr>>16) & 0xF] += offset; \
+     cpu->AddCycles_CD();
+ 
+@@ -244,7 +261,9 @@ A_IMPLEMENT_WB_LDRSTR(LDRB)
+     u32 r = (cpu->CurInstr>>12) & 0xF; \
+     if (r&1) { r--; printf("!! MISALIGNED LDRD %d\n", r+1); } \
+     cpu->DataRead32 (offset  , &cpu->R[r  ]); \
++    if (cpu->DataAbortTaken) return; \
+     cpu->DataRead32S(offset+4, &cpu->R[r+1]); \
++    if (cpu->DataAbortTaken) return; \
+     cpu->AddCycles_CDI();
+ 
+ #define A_LDRD_POST \
+@@ -254,7 +273,9 @@ A_IMPLEMENT_WB_LDRSTR(LDRB)
+     u32 r = (cpu->CurInstr>>12) & 0xF; \
+     if (r&1) { r--; printf("!! MISALIGNED LDRD_POST %d\n", r+1); } \
+     cpu->DataRead32 (addr  , &cpu->R[r  ]); \
++    if (cpu->DataAbortTaken) return; \
+     cpu->DataRead32S(addr+4, &cpu->R[r+1]); \
++    if (cpu->DataAbortTaken) return; \
+     cpu->AddCycles_CDI();
+ 
+ #define A_STRD \
+@@ -264,7 +285,9 @@ A_IMPLEMENT_WB_LDRSTR(LDRB)
+     u32 r = (cpu->CurInstr>>12) & 0xF; \
+     if (r&1) { r--; printf("!! MISALIGNED STRD %d\n", r+1); } \
+     cpu->DataWrite32 (offset  , cpu->R[r  ]); \
++    if (cpu->DataAbortTaken) return; \
+     cpu->DataWrite32S(offset+4, cpu->R[r+1]); \
++    if (cpu->DataAbortTaken) return; \
+     cpu->AddCycles_CD();
+ 
+ #define A_STRD_POST \
+@@ -274,13 +297,16 @@ A_IMPLEMENT_WB_LDRSTR(LDRB)
+     u32 r = (cpu->CurInstr>>12) & 0xF; \
+     if (r&1) { r--; printf("!! MISALIGNED STRD_POST %d\n", r+1); } \
+     cpu->DataWrite32 (addr  , cpu->R[r  ]); \
++    if (cpu->DataAbortTaken) return; \
+     cpu->DataWrite32S(addr+4, cpu->R[r+1]); \
++    if (cpu->DataAbortTaken) return; \
+     cpu->AddCycles_CD();
+ 
+ #define A_LDRH \
+     offset += cpu->R[(cpu->CurInstr>>16) & 0xF]; \
+     if (cpu->CurInstr & (1<<21)) cpu->R[(cpu->CurInstr>>16) & 0xF] = offset; \
+     cpu->DataRead16(offset, &cpu->R[(cpu->CurInstr>>12) & 0xF]); \
++    if (cpu->DataAbortTaken) return; \
+     cpu->AddCycles_CDI(); \
+     if (((cpu->CurInstr>>12) & 0xF) == 15) printf("!! LDRH PC %08X\n", cpu->R[15]); \
+ 
+@@ -288,6 +314,7 @@ A_IMPLEMENT_WB_LDRSTR(LDRB)
+     u32 addr = cpu->R[(cpu->CurInstr>>16) & 0xF]; \
+     cpu->R[(cpu->CurInstr>>16) & 0xF] += offset; \
+     cpu->DataRead16(addr, &cpu->R[(cpu->CurInstr>>12) & 0xF]); \
++    if (cpu->DataAbortTaken) return; \
+     cpu->AddCycles_CDI(); \
+     if (((cpu->CurInstr>>12) & 0xF) == 15) printf("!! LDRH PC %08X\n", cpu->R[15]); \
+ 
+@@ -295,6 +322,7 @@ A_IMPLEMENT_WB_LDRSTR(LDRB)
+     offset += cpu->R[(cpu->CurInstr>>16) & 0xF]; \
+     if (cpu->CurInstr & (1<<21)) cpu->R[(cpu->CurInstr>>16) & 0xF] = offset; \
+     cpu->DataRead8(offset, &cpu->R[(cpu->CurInstr>>12) & 0xF]); \
++    if (cpu->DataAbortTaken) return; \
+     cpu->R[(cpu->CurInstr>>12) & 0xF] = (s32)(s8)cpu->R[(cpu->CurInstr>>12) & 0xF]; \
+     cpu->AddCycles_CDI(); \
+     if (((cpu->CurInstr>>12) & 0xF) == 15) printf("!! LDRSB PC %08X\n", cpu->R[15]); \
+@@ -303,6 +331,7 @@ A_IMPLEMENT_WB_LDRSTR(LDRB)
+     u32 addr = cpu->R[(cpu->CurInstr>>16) & 0xF]; \
+     cpu->R[(cpu->CurInstr>>16) & 0xF] += offset; \
+     cpu->DataRead8(addr, &cpu->R[(cpu->CurInstr>>12) & 0xF]); \
++    if (cpu->DataAbortTaken) return; \
+     cpu->R[(cpu->CurInstr>>12) & 0xF] = (s32)(s8)cpu->R[(cpu->CurInstr>>12) & 0xF]; \
+     cpu->AddCycles_CDI(); \
+     if (((cpu->CurInstr>>12) & 0xF) == 15) printf("!! LDRSB PC %08X\n", cpu->R[15]); \
+@@ -311,6 +340,7 @@ A_IMPLEMENT_WB_LDRSTR(LDRB)
+     offset += cpu->R[(cpu->CurInstr>>16) & 0xF]; \
+     if (cpu->CurInstr & (1<<21)) cpu->R[(cpu->CurInstr>>16) & 0xF] = offset; \
+     cpu->DataRead16(offset, &cpu->R[(cpu->CurInstr>>12) & 0xF]); \
++    if (cpu->DataAbortTaken) return; \
+     cpu->R[(cpu->CurInstr>>12) & 0xF] = (s32)(s16)cpu->R[(cpu->CurInstr>>12) & 0xF]; \
+     cpu->AddCycles_CDI(); \
+     if (((cpu->CurInstr>>12) & 0xF) == 15) printf("!! LDRSH PC %08X\n", cpu->R[15]); \
+@@ -319,6 +349,7 @@ A_IMPLEMENT_WB_LDRSTR(LDRB)
+     u32 addr = cpu->R[(cpu->CurInstr>>16) & 0xF]; \
+     cpu->R[(cpu->CurInstr>>16) & 0xF] += offset; \
+     cpu->DataRead16(addr, &cpu->R[(cpu->CurInstr>>12) & 0xF]); \
++    if (cpu->DataAbortTaken) return; \
+     cpu->R[(cpu->CurInstr>>12) & 0xF] = (s32)(s16)cpu->R[(cpu->CurInstr>>12) & 0xF]; \
+     cpu->AddCycles_CDI(); \
+     if (((cpu->CurInstr>>12) & 0xF) == 15) printf("!! LDRSH PC %08X\n", cpu->R[15]); \
+@@ -365,10 +396,12 @@ void A_SWP(ARM* cpu)
+ 
+     u32 val;
+     cpu->DataRead32(base, &val);
+-    cpu->R[(cpu->CurInstr >> 12) & 0xF] = ROR(val, 8*(base&0x3));
++    if (cpu->DataAbortTaken) return;
+ 
+     u32 numD = cpu->DataCycles;
+     cpu->DataWrite32(base, rm);
++    if (cpu->DataAbortTaken) return;
++    cpu->R[(cpu->CurInstr >> 12) & 0xF] = ROR(val, 8*(base&0x3));
+     cpu->DataCycles += numD;
+ 
+     cpu->AddCycles_CDI();
+@@ -379,10 +412,14 @@ void A_SWPB(ARM* cpu)
+     u32 base = cpu->R[(cpu->CurInstr >> 16) & 0xF];
+     u32 rm = cpu->R[cpu->CurInstr & 0xF] & 0xFF;
+ 
+-    cpu->DataRead8(base, &cpu->R[(cpu->CurInstr >> 12) & 0xF]);
++    u32 val;
++    cpu->DataRead8(base, &val);
++    if (cpu->DataAbortTaken) return;
+ 
+     u32 numD = cpu->DataCycles;
+     cpu->DataWrite8(base, rm);
++    if (cpu->DataAbortTaken) return;
++    cpu->R[(cpu->CurInstr >> 12) & 0xF] = val;
+     cpu->DataCycles += numD;
+ 
+     cpu->AddCycles_CDI();
+@@ -412,7 +449,10 @@ void A_LDM(ARM* cpu)
+     }
+ 
+     if ((cpu->CurInstr & (1<<22)) && !(cpu->CurInstr & (1<<15)))
++    {
++        cpu->UserBankTransfer = true;
+         cpu->UpdateMode(cpu->CPSR, (cpu->CPSR&~0x1F)|0x10, true);
++    }
+ 
+     for (int i = 0; i < 15; i++)
+     {
+@@ -421,6 +461,7 @@ void A_LDM(ARM* cpu)
+             if (preinc) base += 4;
+             if (first) cpu->DataRead32 (base, &cpu->R[i]);
+             else       cpu->DataRead32S(base, &cpu->R[i]);
++            if (cpu->DataAbortTaken) return;
+             first = false;
+             if (!preinc) base += 4;
+         }
+@@ -432,9 +473,10 @@ void A_LDM(ARM* cpu)
+         if (preinc) base += 4;
+         if (first) cpu->DataRead32 (base, &pc);
+         else       cpu->DataRead32S(base, &pc);
++        if (cpu->DataAbortTaken) return;
+         if (!preinc) base += 4;
+ 
+-        if (cpu->Num == 1)
++        if (!LoadPCInterworks(cpu))
+             pc &= ~0x1;
+     }
+ 
+@@ -459,6 +501,7 @@ void A_LDM(ARM* cpu)
+ 
+     if ((cpu->CurInstr & (1<<22)) && !(cpu->CurInstr & (1<<15)))
+         cpu->UpdateMode((cpu->CPSR&~0x1F)|0x10, cpu->CPSR, true);
++    cpu->UserBankTransfer = false;
+ 
+     if (cpu->CurInstr & (1<<15))
+         cpu->JumpTo(pc, cpu->CurInstr & (1<<22));
+@@ -493,6 +536,7 @@ void A_STM(ARM* cpu)
+         else if (mode != 0x10 && mode != 0x1F)
+             isbanked = (baseid >= 13 && baseid < 15);
+ 
++        cpu->UserBankTransfer = true;
+         cpu->UpdateMode(cpu->CPSR, (cpu->CPSR&~0x1F)|0x10, true);
+     }
+ 
+@@ -512,6 +556,7 @@ void A_STM(ARM* cpu)
+             else
+                 first ? cpu->DataWrite32(base, cpu->R[i]) : cpu->DataWrite32S(base, cpu->R[i]);
+ 
++ if (cpu->DataAbortTaken) return;
+             first = false;
+ 
+             if (!preinc) base += 4;
+@@ -520,6 +565,7 @@ void A_STM(ARM* cpu)
+ 
+     if (cpu->CurInstr & (1<<22))
+         cpu->UpdateMode((cpu->CPSR&~0x1F)|0x10, cpu->CPSR, true);
++    cpu->UserBankTransfer = false;
+ 
+     if ((cpu->CurInstr & (1<<23)) && (cpu->CurInstr & (1<<21)))
+         cpu->R[baseid] = base;
+@@ -538,6 +584,7 @@ void T_LDR_PCREL(ARM* cpu)
+ {
+     u32 addr = (cpu->R[15] & ~0x2) + ((cpu->CurInstr & 0xFF) << 2);
+     cpu->DataRead32(addr, &cpu->R[(cpu->CurInstr >> 8) & 0x7]);
++    if (cpu->DataAbortTaken) return;
+ 
+     cpu->AddCycles_CDI();
+ }
+@@ -547,6 +594,7 @@ void T_STR_REG(ARM* cpu)
+ {
+     u32 addr = cpu->R[(cpu->CurInstr >> 3) & 0x7] + cpu->R[(cpu->CurInstr >> 6) & 0x7];
+     cpu->DataWrite32(addr, cpu->R[cpu->CurInstr & 0x7]);
++    if (cpu->DataAbortTaken) return;
+ 
+     cpu->AddCycles_CD();
+ }
+@@ -555,6 +603,7 @@ void T_STRB_REG(ARM* cpu)
+ {
+     u32 addr = cpu->R[(cpu->CurInstr >> 3) & 0x7] + cpu->R[(cpu->CurInstr >> 6) & 0x7];
+     cpu->DataWrite8(addr, cpu->R[cpu->CurInstr & 0x7]);
++    if (cpu->DataAbortTaken) return;
+ 
+     cpu->AddCycles_CD();
+ }
+@@ -565,6 +614,7 @@ void T_LDR_REG(ARM* cpu)
+ 
+     u32 val;
+     cpu->DataRead32(addr, &val);
++    if (cpu->DataAbortTaken) return;
+     cpu->R[cpu->CurInstr & 0x7] = ROR(val, 8*(addr&0x3));
+ 
+     cpu->AddCycles_CDI();
+@@ -574,6 +624,7 @@ void T_LDRB_REG(ARM* cpu)
+ {
+     u32 addr = cpu->R[(cpu->CurInstr >> 3) & 0x7] + cpu->R[(cpu->CurInstr >> 6) & 0x7];
+     cpu->DataRead8(addr, &cpu->R[cpu->CurInstr & 0x7]);
++    if (cpu->DataAbortTaken) return;
+ 
+     cpu->AddCycles_CDI();
+ }
+@@ -583,6 +634,7 @@ void T_STRH_REG(ARM* cpu)
+ {
+     u32 addr = cpu->R[(cpu->CurInstr >> 3) & 0x7] + cpu->R[(cpu->CurInstr >> 6) & 0x7];
+     cpu->DataWrite16(addr, cpu->R[cpu->CurInstr & 0x7]);
++    if (cpu->DataAbortTaken) return;
+ 
+     cpu->AddCycles_CD();
+ }
+@@ -591,6 +643,7 @@ void T_LDRSB_REG(ARM* cpu)
+ {
+     u32 addr = cpu->R[(cpu->CurInstr >> 3) & 0x7] + cpu->R[(cpu->CurInstr >> 6) & 0x7];
+     cpu->DataRead8(addr, &cpu->R[cpu->CurInstr & 0x7]);
++    if (cpu->DataAbortTaken) return;
+     cpu->R[cpu->CurInstr & 0x7] = (s32)(s8)cpu->R[cpu->CurInstr & 0x7];
+ 
+     cpu->AddCycles_CDI();
+@@ -600,6 +653,7 @@ void T_LDRH_REG(ARM* cpu)
+ {
+     u32 addr = cpu->R[(cpu->CurInstr >> 3) & 0x7] + cpu->R[(cpu->CurInstr >> 6) & 0x7];
+     cpu->DataRead16(addr, &cpu->R[cpu->CurInstr & 0x7]);
++    if (cpu->DataAbortTaken) return;
+ 
+     cpu->AddCycles_CDI();
+ }
+@@ -608,6 +662,7 @@ void T_LDRSH_REG(ARM* cpu)
+ {
+     u32 addr = cpu->R[(cpu->CurInstr >> 3) & 0x7] + cpu->R[(cpu->CurInstr >> 6) & 0x7];
+     cpu->DataRead16(addr, &cpu->R[cpu->CurInstr & 0x7]);
++    if (cpu->DataAbortTaken) return;
+     cpu->R[cpu->CurInstr & 0x7] = (s32)(s16)cpu->R[cpu->CurInstr & 0x7];
+ 
+     cpu->AddCycles_CDI();
+@@ -620,6 +675,7 @@ void T_STR_IMM(ARM* cpu)
+     offset += cpu->R[(cpu->CurInstr >> 3) & 0x7];
+ 
+     cpu->DataWrite32(offset, cpu->R[cpu->CurInstr & 0x7]);
++    if (cpu->DataAbortTaken) return;
+     cpu->AddCycles_CD();
+ }
+ 
+@@ -630,6 +686,7 @@ void T_LDR_IMM(ARM* cpu)
+ 
+     u32 val;
+     cpu->DataRead32(offset, &val);
++    if (cpu->DataAbortTaken) return;
+     cpu->R[cpu->CurInstr & 0x7] = ROR(val, 8*(offset&0x3));
+     cpu->AddCycles_CDI();
+ }
+@@ -640,6 +697,7 @@ void T_STRB_IMM(ARM* cpu)
+     offset += cpu->R[(cpu->CurInstr >> 3) & 0x7];
+ 
+     cpu->DataWrite8(offset, cpu->R[cpu->CurInstr & 0x7]);
++    if (cpu->DataAbortTaken) return;
+     cpu->AddCycles_CD();
+ }
+ 
+@@ -649,6 +707,7 @@ void T_LDRB_IMM(ARM* cpu)
+     offset += cpu->R[(cpu->CurInstr >> 3) & 0x7];
+ 
+     cpu->DataRead8(offset, &cpu->R[cpu->CurInstr & 0x7]);
++    if (cpu->DataAbortTaken) return;
+     cpu->AddCycles_CDI();
+ }
+ 
+@@ -659,6 +718,7 @@ void T_STRH_IMM(ARM* cpu)
+     offset += cpu->R[(cpu->CurInstr >> 3) & 0x7];
+ 
+     cpu->DataWrite16(offset, cpu->R[cpu->CurInstr & 0x7]);
++    if (cpu->DataAbortTaken) return;
+     cpu->AddCycles_CD();
+ }
+ 
+@@ -668,6 +728,7 @@ void T_LDRH_IMM(ARM* cpu)
+     offset += cpu->R[(cpu->CurInstr >> 3) & 0x7];
+ 
+     cpu->DataRead16(offset, &cpu->R[cpu->CurInstr & 0x7]);
++    if (cpu->DataAbortTaken) return;
+     cpu->AddCycles_CDI();
+ }
+ 
+@@ -678,6 +739,7 @@ void T_STR_SPREL(ARM* cpu)
+     offset += cpu->R[13];
+ 
+     cpu->DataWrite32(offset, cpu->R[(cpu->CurInstr >> 8) & 0x7]);
++    if (cpu->DataAbortTaken) return;
+     cpu->AddCycles_CD();
+ }
+ 
+@@ -687,6 +749,7 @@ void T_LDR_SPREL(ARM* cpu)
+     offset += cpu->R[13];
+ 
+     cpu->DataRead32(offset, &cpu->R[(cpu->CurInstr >> 8) & 0x7]);
++    if (cpu->DataAbortTaken) return;
+     cpu->AddCycles_CDI();
+ }
+ 
+@@ -706,6 +769,7 @@ void T_PUSH(ARM* cpu)
+         {
+             if (first) cpu->DataWrite32 (base, cpu->R[i]);
+             else       cpu->DataWrite32S(base, cpu->R[i]);
++            if (cpu->DataAbortTaken) return;
+             first = false;
+             base += 4;
+         }
+@@ -715,6 +779,7 @@ void T_PUSH(ARM* cpu)
+     {
+         if (first) cpu->DataWrite32 (base, cpu->R[14]);
+         else       cpu->DataWrite32S(base, cpu->R[14]);
++        if (cpu->DataAbortTaken) return;
+     }
+ 
+     cpu->AddCycles_CD();
+@@ -731,6 +796,7 @@ void T_POP(ARM* cpu)
+         {
+             if (first) cpu->DataRead32 (base, &cpu->R[i]);
+             else       cpu->DataRead32S(base, &cpu->R[i]);
++            if (cpu->DataAbortTaken) return;
+             first = false;
+             base += 4;
+         }
+@@ -741,7 +807,8 @@ void T_POP(ARM* cpu)
+         u32 pc;
+         if (first) cpu->DataRead32 (base, &pc);
+         else       cpu->DataRead32S(base, &pc);
+-        if (cpu->Num==1) pc |= 0x1;
++        if (cpu->DataAbortTaken) return;
++        if (!LoadPCInterworks(cpu)) pc |= 0x1;
+         cpu->JumpTo(pc);
+         base += 4;
+     }
+@@ -761,6 +828,7 @@ void T_STMIA(ARM* cpu)
+         {
+             if (first) cpu->DataWrite32 (base, cpu->R[i]);
+             else       cpu->DataWrite32S(base, cpu->R[i]);
++            if (cpu->DataAbortTaken) return;
+             first = false;
+             base += 4;
+         }
+@@ -782,6 +850,7 @@ void T_LDMIA(ARM* cpu)
+         {
+             if (first) cpu->DataRead32 (base, &cpu->R[i]);
+             else       cpu->DataRead32S(base, &cpu->R[i]);
++            if (cpu->DataAbortTaken) return;
+             first = false;
+             base += 4;
+         }
+diff --git a/src/CP15.cpp b/src/CP15.cpp
+index 9fa0281b..f030a536 100644
+--- a/src/CP15.cpp
++++ b/src/CP15.cpp
+@@ -902,6 +902,12 @@ void ARMv5::DataRead32(u32 addr, u32* val)
+ 
+ void ARMv5::DataRead32S(u32 addr, u32* val)
+ {
++    if (!(PU_Map[addr>>12] & 0x01))
++    {
++        DataAbort();
++        return;
++    }
++
+     addr &= ~3;
+ 
+     if (addr < ITCMSize)
+@@ -1011,6 +1017,12 @@ void ARMv5::DataWrite32(u32 addr, u32 val)
+ 
+ void ARMv5::DataWrite32S(u32 addr, u32 val)
+ {
++    if (!(PU_Map[addr>>12] & 0x02))
++    {
++        DataAbort();
++        return;
++    }
++
+     addr &= ~3;
+ 
+     if (addr < ITCMSize)
