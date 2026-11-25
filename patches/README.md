@@ -24,8 +24,32 @@ other independent files in this repository.
 
 ## GBARunner3 integration patches
 
-The three `gbarunner3-*.patch` files modify GBARunner3 revision
+The `gbarunner3-*.patch` files modify GBARunner3 revision
 `ecaa817815d9761745606592f04affe5ee9c3731`, by Gericom and contributors.
 No general license for that revision was identified in the review. No license
 is assigned to those upstream portions by this document. Their status is
 recorded in [LICENSING.md](../LICENSING.md).
+
+`gbarunner3-alttp-touch.patch` adds an optional calibrated touch mailbox for the
+Zelda build. It uses the libnds touch API and caches calibration before
+the runtime reuses firmware-settings memory for ROM data. It does not copy the
+Zelda disassembly or game artwork into this repository. The map UI code is
+relocated to privileged executable runtime RAM with a data-cache clean during
+startup; the GBA instruction-cache policy remains unchanged.
+Touch and backlight transactions now share an RTOS mutex, allowing the sound
+thread to preempt SPI sampling. `runtime/alttp/arm7/ZeldaTouch.c` is a modified
+libnds v1.8.3 driver, retaining its original notice; its read wrappers no longer
+mask audio interrupts. This change is Zelda-specific.
+
+`gbarunner3-audio-counters.patch` is an optional Zelda-only diagnostic that
+counts ARM7 sound FIFO underruns. Normal builds do not apply it. Instrumentation
+itself disrupted Fusion startup, so the builder rejects that combination.
+See [display/audio timing](../docs/display-audio.md) for the control comparison
+and the separate runtime fix, which uses the existing sound DMA path.
+
+`gbarunner3-alttp-world-map.patch` connects the Zelda-only native perspective
+handler to HBlank. It uses the game's scanline scale table for outdoor-map
+BG2X/BG2Y/BG2PA updates and consumes that effect's guest interrupt to avoid doing
+the same work twice. Other effects, DMA, audio and Fusion retain their existing
+paths. See [Zelda inventory and maps](../docs/alttp-inventory.md) for validation
+and the remaining hardware check.

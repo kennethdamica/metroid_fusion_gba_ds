@@ -26,7 +26,8 @@ def worker(args):
     os.environ["MELONDSDS_SKIP_ERROR_SCREEN"] = "1"
     os.environ["TZ"] = "UTC"
     time.tzset()
-    from libretro import Session, ExplicitPathDriver, ArrayVideoDriver, JoypadState, RETRO_MEMORY_SYSTEM_RAM, UnformattedLogDriver
+    from libretro import Session, ExplicitPathDriver, ArrayVideoDriver, JoypadState, PointerState, Pointer, RETRO_MEMORY_SYSTEM_RAM, UnformattedLogDriver
+    from libretro.drivers.input.iterable import PortState
     from PIL import Image
 
     root = args.output.resolve()
@@ -54,6 +55,7 @@ def worker(args):
         "melonds_homebrew_readonly": "disabled",
         "melonds_screen_layout1": "top-bottom", "melonds_screen_gap": "0",
         "melonds_show_cursor": "disabled", "melonds_start_time_mode": "absolute",
+        "melonds_touch_mode": "touch",
         "melonds_network_mode": "disabled",
     }
     scripted_inputs = json.loads(args.input_script.read_text()) if args.input_script else None
@@ -70,7 +72,10 @@ def worker(args):
         for event in scripted_inputs:
             if not 0 <= event['start'] < event['end'] <= args.frames:
                 raise ValueError('Input interval outside frame range')
-            JoypadState(**{button: True for button in event['buttons']})
+            JoypadState(**{button: True for button in event.get('buttons', [])})
+            if 'touch' in event:
+                from touch_input import pointer_coordinates
+                pointer_coordinates(*event['touch'])
     booting = args.wait_package
     def inputs():
         frame = 0
@@ -81,9 +86,17 @@ def worker(args):
             if scripted_inputs is None:
                 yield JoypadState(a=args.press_a_start <= frame < args.press_a_end)
             else:
-                yield JoypadState(**{button: True for event in scripted_inputs
-                                    if event['start'] <= frame < event['end']
-                                    for button in event['buttons']})
+                active = [event for event in scripted_inputs if event['start'] <= frame < event['end']]
+                joypad = JoypadState(**{button: True for event in active for button in event.get('buttons', [])})
+                touches = [event['touch'] for event in active if 'touch' in event]
+                if len(touches) > 1:
+                    raise ValueError('Overlapping touch events')
+                pointer = PointerState()
+                if touches:
+                    from touch_input import pointer_coordinates
+                    x, y = pointer_coordinates(*touches[0])
+                    pointer = PointerState((Pointer(x, y, True),))
+                yield PortState(joypad=joypad, pointer=pointer)
             frame += 1
 
     result = {"rom": str(args.rom.resolve()), "rom_sha256": sha256(args.rom),
@@ -94,6 +107,9 @@ def worker(args):
               "sd_inputs": {str(p.relative_to(args.sd_dir)): sha256(p)
                             for p in sorted(args.sd_dir.rglob('*')) if p.is_file()} if args.sd_dir else {}}
     (root / "result.json").write_text(json.dumps(result, indent=2))
+    from array import array
+    audio_samples=array("h")
+    audio_rate=None
     images = {}
     capture_frames = {int(n) for n in args.capture.split(",")} | {args.frames}
     start = time.monotonic()
@@ -172,6 +188,8 @@ def worker(args):
                 raise RuntimeError('Package did not finish startup within frame budget')
             booting = False
             print(f"Package ready after {boot_frame} frames: {result['package_boot']}", flush=True)
+        audio_rate=round(emu.audio.system_av_info.timing.sample_rate)
+        del emu.audio.buffer[:]
         for frame in range(1, args.frames + 1):
             for event in memory_events:
                 if event['frame'] == frame:
@@ -183,6 +201,9 @@ def worker(args):
                     data = bytes.fromhex(event['hex'])
                     target[event['offset']:event['offset']+len(data)] = data
             emu.run()
+            if args.audio_start is not None and args.audio_start<=frame<=args.audio_end:
+                audio_samples.extend(emu.audio.buffer)
+            del emu.audio.buffer[:]
             result["frames_completed"] = frame
             if frame in capture_frames:
                 shot = emu.video.screenshot()
@@ -212,6 +233,12 @@ def worker(args):
                                            "pixel_sha256": hashlib.sha256(image.tobytes()).hexdigest()})
                 (root / "result.json").write_text(json.dumps(result, indent=2))
                 print(f"Captured frame {frame}: {image.size}", flush=True)
+    if args.audio_start is not None:
+        import wave
+        with wave.open(str(root/"audio.wav"),"wb") as output:
+            output.setnchannels(2);output.setsampwidth(2);output.setframerate(audio_rate)
+            output.writeframes(audio_samples.tobytes())
+        result["audio_capture"]=dict(file="audio.wav",sample_rate=audio_rate,frames=len(audio_samples)//2,start=args.audio_start,end=args.audio_end)
     def check(name, condition):
         result["assertions"].append({"name": name, "passed": bool(condition)})
     if args.assert_probe:
@@ -244,7 +271,7 @@ def worker(args):
             relative = original.relative_to(args.sd_dir)
             copied = sd / relative
             unchanged = copied.is_file() and sha256(copied) == sha256(original)
-            if original.suffix.lower() == '.nds' and args.wait_package and copied.is_file():
+            if original.suffix.lower() == '.nds' and copied.is_file():
                 from package_fusion import verify_melonds_copy
                 valid = unchanged or verify_melonds_copy(original, copied)
                 check(f'NDS_only_expected_loader_changes:{relative}', valid)
@@ -283,13 +310,15 @@ def main():
     parser.add_argument("--nds-launch-path", help="Model the launcher's actual SD argv[0], e.g. fat:/Fusion.nds")
     parser.add_argument("--wait-package", action='store_true', help='Wait for bootstrap handoff before the gameplay input/capture timeline')
     parser.add_argument("--package-boot-frames", type=int, default=30000)
-    parser.add_argument("--input-script", type=Path, help='JSON array of {start,end,buttons} frame intervals')
+    parser.add_argument("--input-script", type=Path, help='JSON intervals {start,end,buttons?,touch?:[x,y]}; touch uses bottom-screen pixels')
     parser.add_argument('--memory-script', type=Path, help='Test-only JSON writes to isolated emulator RAM at specified frames')
     parser.add_argument("--fusion-state", action='store_true', help='Decode US Fusion IWRAM using the patched diagnostic core')
     parser.add_argument("--assert-fusion", action='store_true', help='Verify the full scripted Fusion new-game/movement run')
     parser.add_argument("--assert-fusion-screen", action='store_true', help='Check rendered bottom-screen IDs/grid against guest RAM')
     parser.add_argument("--frames", type=int, default=240)
     parser.add_argument("--capture", default="60,120,180,240")
+    parser.add_argument("--audio-start",type=int,help="First gameplay-timeline frame to record to audio.wav")
+    parser.add_argument("--audio-end",type=int,help="Last recorded frame (inclusive)")
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--press-a-start", type=int, default=150)
     parser.add_argument("--press-a-end", type=int, default=210)
@@ -302,6 +331,8 @@ def main():
     args = parser.parse_args()
     if args.frames <= 0 or args.timeout <= 0:
         parser.error("Frame and timeout limits must be positive")
+    if (args.audio_start is None)!=(args.audio_end is None) or (args.audio_start is not None and not 1<=args.audio_start<=args.audio_end<=args.frames):
+        parser.error("Specify a valid --audio-start/--audio-end range")
     if args.worker:
         return worker(args)
     if args.output.exists():

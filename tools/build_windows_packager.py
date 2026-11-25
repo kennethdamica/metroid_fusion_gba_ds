@@ -70,7 +70,7 @@ def main():
     run([*docker, 'Z:/project/tools/build_packager.py', '--output', 'Z:/project/'+output.as_posix()])
     if test_output:
         run([*docker, 'Z:/project/tools/test_packager_cli.py', '--executable',
-             'Z:/project/'+output.as_posix()+'/windows-x86_64/fusion-pack.exe',
+             'Z:/project/'+output.as_posix()+'/windows-x86_64/gba-ds-pack.exe',
              '--output', 'Z:/project/'+test_output.as_posix()])
 
 

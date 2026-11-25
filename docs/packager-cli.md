@@ -1,217 +1,208 @@
 # Standalone command-line packager
 
-`fusion-pack` creates a dual-screen Fusion `.nds` using a local, user-supplied
-ROM and BIOS. The executable includes the prebuilt enhanced runtime and its
-own Python interpreter. End users need no project checkout, Python, Docker,
-compiler or emulator. It performs no network requests.
+`gba-ds-pack` includes both enhanced runtimes in one executable per platform.
+It creates an NDS from the user's ROM and original GBA BIOS, entirely offline.
+End users do not need Python, Docker, Wine, a compiler or an emulator.
+No game ROM, game graphics or BIOS is bundled in the executable.
 
 ```sh
-./fusion-pack "Metroid Fusion (USA).gba" --bios bios.bin -o Fusion.nds
+./gba-ds-pack "Metroid Fusion (USA).gba" --bios bios.bin -o Fusion.nds
+./gba-ds-pack "Zelda ALttP (USA).gba" --bios bios.bin -o Zelda.nds
 ```
 
-On Windows x64, extract the Windows ZIP and run this in PowerShell:
+On Windows PowerShell, use `.\gba-ds-pack.exe` with the same arguments.
+`--bios` accepts a raw 16 KiB BIOS or a ZIP containing exactly one such file.
+The BIOS must match the supported original; the ROM override does not bypass
+BIOS validation.
 
-```powershell
-.\fusion-pack.exe "Metroid Fusion (USA).gba" --bios bios.bin -o Fusion.nds
-```
+## Game selection and experimental variants
 
-Only the executable and your own inputs are needed. Python, Wine and Docker
-are not Windows end-user requirements. The output can be any new `.nds` path
-on your filesystem, for example `-o "C:\Users\You\Desktop\Fusion.nds"`.
+Known originals are detected by SHA-1:
 
-`--bios` also accepts a ZIP containing exactly one 16 KiB BIOS file. The only
-supported game is the original US Fusion revision, SHA-1
-`ca33f4348c2c05dd330d37b97e2c5a69531dfe87`. Other games, revisions and modified
-ROMs are rejected. The BIOS is also verified. These identities are centralized
-in `tools/fusion_profile.py`, rather than imported from emulator test code.
+| Adapter | Supported original | SHA-1 |
+| --- | --- | --- |
+| `fusion` | Metroid Fusion, USA revision 0, 8 MiB | `ca33f4348c2c05dd330d37b97e2c5a69531dfe87` |
+| `alttp` | A Link to the Past & Four Swords, USA revision 0, 8 MiB; ALttP adventure | `a272055abbbf6c26b0cd54c87395d01699589161` |
 
-The `-o` path selects where the finished NDS is saved on the user's filesystem.
-Its default is `Fusion.nds` in the current working directory. Parent folders
-are created as needed. The program generates only one NDS unless `--manifest`
-is requested. Existing output files, report files and dangling output symlinks
-are refused. The input ROM and BIOS are never modified.
+An unknown hash fails by default. To try a variant, explicitly select its adapter:
 
 ```sh
-./fusion-pack --version
-./fusion-pack --list-games
-./fusion-pack --inspect Fusion.nds
-./fusion-pack "Metroid Fusion (USA).gba" --bios gba_bios.zip \
-  -o "My games/Fusion.nds" --manifest --json
+./gba-ds-pack "Zelda variant.gba" --bios bios.bin --game alttp \
+  --allow-unsupported-rom -o Zelda.nds --manifest
 ```
 
-Success is exit 0; input/file errors are exit 1, usage errors 2, cancellation
-130. `--json` prints structured results, while ordinary output gives the saved
-path, size, checksum and flashcart instructions. Inspection does not change
-the file.
+Use `--game fusion` for Fusion. The override requires `--game`; the packager
+does not guess an unknown ROM's adapter from its filename. An explicit adapter
+that conflicts with a known ROM is rejected.
 
-The DS package format, extraction directory and save identity are unchanged.
-Copy the finished NDS to the flashcart SD root as `Fusion.nds`, retaining the
-existing `_fusion` directory. Game saves are written on the flashcart SD by
-the runtime; they are not written into the host executable or NDS.
+The override relaxes **only the full-ROM identity requirement**. It still
+requires the supported game code, region, revision, exact 8 MiB size, valid GBA
+header and matching protected code/data ranges. Zelda's adapter graphics also
+undergo compressed-stream bounds and map palette-index checks. The protected
+range offsets and SHA-256 digests live in `tools/rom_compatibility.json`; no
+reference ROM bytes are distributed.
 
-## Safe output publication
+These checks are conservative: engine changes, other regions/revisions and
+expanded ROMs remain rejected. Some cosmetic or text variants may pass.
+Passing preflight does not establish that a modified ROM plays correctly or
+that its maps and touch controls remain compatible. Synthetic padding changes
+are used to test the override; they are not evidence of arbitrary hack support.
 
-The builder writes to a unique temporary file in the destination directory,
-flushes/syncs it, and validates the completed NDS before publishing its final
-name. macOS uses `renamex_np(RENAME_EXCL)` so a destination created concurrently
-cannot be overwritten. Windows uses non-replacing rename; the Linux path uses
-a same-directory hard link and therefore requires a filesystem supporting it.
-Unsupported filesystems fail safely rather than falling back to overwriting.
+Experimental builds and inspections print a warning to stderr, including in
+JSON mode. Reports identify the actual ROM SHA-1, game, experimental status,
+checks performed, extracted-data directory and save path.
 
-Optional manifests are staged before publication as well. A failed NDS
-publication removes the newly created manifest only if its file identity still
-matches. Handled write failures/cancellation remove temporary files. A sudden
-process kill or power loss can leave a hidden temporary file or a report
-without its NDS; no claim of multi-file or power-loss atomicity is made.
+## Output and save behavior
 
-## Build
+`-o` selects any new `.nds` path, creating parent directories if needed. The
+default is `Fusion.nds` or `Zelda.nds` in the current directory. Inputs are only
+read. Existing packages, companion reports and dangling output symlinks are
+never overwritten. `--manifest` adds a companion report; otherwise only the NDS
+is created.
 
-For a fresh clone, first follow [developer setup](development.md) to create the
-Python environment and fetch/build the pinned baseline. Paths under `artifacts/`
-below are local outputs, not files shipped in the source repository.
+```sh
+./gba-ds-pack --version
+./gba-ds-pack --list-games --json
+./gba-ds-pack --inspect Zelda.nds --json
+```
+
+Exit codes: 0 success, 1 validation/file error, 2 command usage error,
+130 cancellation. Inspection auto-detects either game's package and is read-only.
+
+Copy the output to the flashcart SD root as `Fusion.nds` or `Zelda.nds`.
+These names support launchers that supply no launch path. Keep the existing
+`_fusion` and `_alttp` directories. A writable DLDI flashcart and about 9 MiB
+free beyond each package are required for extraction.
+
+Each ROM has a separate identity:
+
+```text
+_fusion/<actual ROM SHA-1>/v1/{rom.gba,bios.bin,config.json}
+_fusion/<actual ROM SHA-1>/rom.sav
+_alttp/<actual ROM SHA-1>/v1/{rom.gba,bios.bin,config.json}
+_alttp/<actual ROM SHA-1>/rom.sav
+```
+
+Known originals keep their existing paths. Different variants get distinct
+save folders; saves are never automatically copied between them. A second
+launch verifies and reuses the extracted files. Replacing an NDS does not
+replace its save. Do not distribute a generated NDS containing your ROM/BIOS.
+
+## Manifest and integrity
+
+New templates use manifest ABI 2: the original 76-byte identity record plus a
+32-bit flags field. Bit 0 declares an experimental ROM; other bits are rejected.
+Manifest version/ABI/length must agree. Actual ROM, BIOS and config SHA-1s are
+stored in the manifest. BIOS/config remain pinned; a nonexperimental ROM must
+match the selected adapter's known hash.
+
+The extractor derives paths from the manifest's ROM digest, verifies extraction
+against that digest, then re-reads the stored bytes before publishing the file.
+Later launches hash existing files before reusing them. The override never
+suppresses payload integrity checks. A corrupted package still fails. Saves
+are outside the extraction replacement paths. These checks detect corruption;
+the manifest is not a cryptographic signature or an anti-tampering boundary.
+
+The new inspector/extractor also accept verified ABI 1 manifests. The source
+builder can package a known original with an older ABI 1 template, but refuses
+experimental variants unless the runtime supports ABI 2. The `v1` data folder
+name is retained because the extracted-file layout is unchanged.
+
+On the host, output is staged, flushed and inspected before non-overwriting
+publication: macOS `renamex_np(RENAME_EXCL)`, Windows non-replacing rename,
+Linux same-directory hard link. Handled failures clean up temporary files.
+Power loss can leave a hidden temporary or companion report; multi-file
+power-loss atomicity is not promised.
+
+## Automated builds and releases
+
+Pushes to `main` build both native platform executables and retain tested ZIPs
+as Actions artifacts. Pushing a matching version tag, such as `v0.2.0`, rebuilds
+and publishes a GitHub prerelease with both ZIPs and checksums.
+[GitHub publishing](github-setup.md) describes the workflow and release steps.
+CI uses no game data; it verifies templates against locally validated hashes.
+
+## Developer builds
+
+Start with [development setup](development.md). Build both runtimes:
 
 ```sh
 .venv/bin/python -m pip install -r requirements-packager.txt
 .venv/bin/python tools/build_dual_screen.py --hardware-diagnostics
-.venv/bin/python tools/build_packager.py
+.venv/bin/python tools/build_dual_screen.py --game alttp --package-template
+.venv/bin/python tools/build_packager.py --output artifacts/packager-0.2.0
 ```
 
-The first delivered build is Apple Silicon macOS, tested on macOS 14.4. The
-build refuses an existing destination; use `--output artifacts/packager-next`
-for another build. Build dependencies are pinned separately from emulator
-dependencies. PyInstaller creates an executable specific to the host OS and
-architecture; Intel macOS and Linux still need their own builds and tests.
-See [PyInstaller's platform model](https://pyinstaller.org/en/stable/operating-mode.html).
+The freezer checks each template against its build manifest, source hashes and
+`release/packager/runtime-lock.json`. Update that lock only after validating the
+new packages in patched melonDS. Fusion uses the working hardware-diagnostic
+runtime; Zelda uses `artifacts/alttp-package-runtime`.
 
-### Windows x64
+The explicit data allowlist contains two runtime-only NDS templates, their two
+manifests, and the compatibility digest JSON. The freezer does not recursively
+collect artifacts, ROMs, BIOS files, saves or generated game packages.
+Templates with populated NitroFS or mismatched checksums are rejected.
 
-The Windows executable is frozen by Windows CPython 3.13.7 and Windows
-PyInstaller 6.22.3. On this Mac they run under Wine 10 in a Linux amd64
-container; the result is a Windows PE executable, not a script or Wine wrapper.
-The developer helper downloads official CPython NuGet and PyPI wheels,
-verifies the hashes in `release/packager/windows-downloads.json`, and uses
-`release/packager/windows.Dockerfile` with a pinned Debian base. Debian apt
-packages are not snapshot-pinned; this records a repeatable workflow rather
-than promising bit-identical host executables across future rebuilds.
-
-With Docker running and the validated hardware runtime already built:
+Windows x64 can be built on this Mac with the pinned Windows CPython/PyInstaller
+under Wine in Docker:
 
 ```sh
 .venv/bin/python tools/build_windows_packager.py \
-  --output artifacts/packager-next \
-  --test-output artifacts/packager-next-windows-test
+  --output artifacts/packager-0.2.0 \
+  --test-output artifacts/packager-0.2.0-windows-test
 ```
 
-The image build context contains only allowlisted Python/build wheels. The
-freezer and tests run locally with container networking disabled. Tests require
-the local ROM/BIOS; neither input is embedded in the executable or release ZIP.
-`--test-output` is optional when building without those inputs.
+The helper verifies cached/downloaded Python and wheel checksums; its Docker
+build context is allowlisted. Freezing/testing run with networking disabled.
+Windows users receive a real standalone PE executable and need none of these
+developer dependencies. Native Windows developers can instead run
+`tools/build_packager.py` with the same runtime artifacts and pinned Python
+requirements. Wine testing does not replace native Windows testing.
 
-A developer on native Windows can instead use 64-bit Python 3.13, install
-`requirements-packager.txt`, and run `tools/build_packager.py` followed by
-`tools/test_packager_cli.py`. Supply the exact runtime and its manifest at
-`artifacts/hardware-runtime`; the checksum/source-input checks still apply.
-That native workflow needs no Docker or Wine. Native Windows 10/11 testing is
-still required before calling this preview Windows-release-ready.
+Outputs under the chosen build directory:
 
-Windows outputs:
+- `macos-arm64/gba-ds-pack` and `windows-x86_64/gba-ds-pack.exe`.
+- `gba-ds-pack-0.2.0-<platform>-preview.zip`, including usage and license notices.
+- Per-platform `build.json`, recording executable, runtime and source hashes.
 
-- `artifacts/packager/windows-x86_64/fusion-pack.exe`: standalone executable.
-- `artifacts/packager/fusion-pack-0.1.0-windows-x86_64-preview.zip`: executable,
-  Windows usage guide, provenance and available license notices.
-- `artifacts/packager/windows-x86_64/build.json`: input/output hashes and build
-  environment. The executable is unsigned; Authenticode is a release task.
-
-Mac outputs:
-
-- `artifacts/packager/macos-arm64/fusion-pack`: standalone executable.
-- `artifacts/packager/fusion-pack-0.1.0-macos-arm64-preview.zip`: executable,
-  usage guide, provenance, available license notices and build manifest.
-- `artifacts/packager/macos-arm64/build.json`: source/template/executable hashes.
-
-The freezer has an explicit data allowlist: the runtime-only
-`FusionTemplate.nds` and its manifest. It does not recursively collect
-`artifacts`, `fixtures`, game packages, ROMs or BIOS files. The build rejects a
-template with populated NitroFS, a mismatched checksum or stale source inputs.
-The template must also match `release/packager/runtime-lock.json`, which pins
-the fully tested Hardware Test 5 runtime. The startup diagnostic label is kept.
-
-The initial packaging test exposed a stall in the separate non-diagnostic
-`artifacts/package-runtime` template. Container checks and its earlier border
-smoke test passed, but guest execution did not advance. That template is not
-used by this release. Its failed full run is retained under
-`artifacts/packager-emulator-test`, and the rejected executable under
-`artifacts/packager-rejected-standard`. The CLI and developer packager now
-default to `artifacts/hardware-runtime`.
+Generated files are ignored and are not in Git. Publish only the intended
+ROM-free platform ZIPs as release assets when ready; do not add artifacts to
+source control. Existing output directories are refused.
 
 ## Validation
 
 ```sh
+.venv/bin/python -m unittest discover -s tests/public -v
 .venv/bin/python -m unittest discover -s tests/package -v
+.venv/bin/python -m unittest discover -s tests/alttp -v
+.venv/bin/python tools/test_package_variants.py --output artifacts/variant-test-new
 .venv/bin/python tools/test_packager_cli.py \
-  --executable artifacts/packager/macos-arm64/fusion-pack \
-  --output artifacts/my-packager-test
-.venv/bin/python tools/test_packaged_fusion.py \
-  --package artifacts/my-packager-test/Fusion.nds \
-  --output artifacts/my-packager-emulator-test
+  --executable artifacts/packager-0.2.0/macos-arm64/gba-ds-pack \
+  --output artifacts/packager-0.2.0-macos-test
 ```
 
-The executable test copies only the binary and explicitly supplied input files
-to a fresh temporary folder outside the checkout, empties `PATH`, and exercises
-paths with spaces/Unicode, raw/ZIP BIOS, default/custom output, JSON, optional
-reports, inspection, invalid inputs, filesystem failures and existing-file
-protection. Its NDS must match the reference builder exactly. It also opens
-the frozen archive and audits its runtime files and proprietary-payload hashes.
+Local tests require user-supplied game/BIOS files. The executable test runs the
+actual binary from an isolated Unicode directory with an empty PATH. It tests
+both games, the experimental override, save paths, compatibility rejection,
+JSON output, read-only inspection, existing-file protection and the frozen data
+allowlist. Generated packages must match the gameplay-tested release hashes.
 
-Builder tests cover write/sync failure cleanup, a destination created during
-publication, dangling symlinks, runtime tampering, format corruption and
-reproducibility. Emulator acceptance uses the NDS produced by the actual
-standalone binary, including first extraction and repeat-launch save checks.
+`tools/test_packaged_fusion.py` exercises full gameplay, first extraction,
+second launch, save preservation, interrupted extraction recovery and corrupted
+payload/bounds rejection. `tools/test_alttp.py` exercises gameplay, inventory,
+maps and repeat launch. `tools/test_package_variants.py` tests extraction/reuse,
+variant/original save isolation, payload corruption and manifest opt-in checks
+for both games. It uses synthetic identity changes, not third-party hacks.
 
-Current preview evidence:
+## Menu banners and release status
 
-- `artifacts/packager-cli-verified/result.json`: 44/44 standalone CLI and
-  frozen-content assertions. The binary runs with an empty `PATH` outside
-  the checkout and produces Hardware Test 5 byte for byte.
-- `tests/package/test_builder.py`: 12/12 builder tests, including failed writes
-  and a concurrent destination-file race.
-- `artifacts/packager-verified/result.json`: package acceptance on the generated
-  NDS. Its 30,000-frame first-boot evidence is reused from the exact same NDS
-  and core hashes in `artifacts/screen-framing-dev/test2/first-boot`; subsequent
-  launch, save and recovery/rejection checks run again.
-- The final executable passes `codesign --verify --strict`; this confirms the
-  local ad-hoc signature, not Developer ID signing or notarization.
+Both packages have original code-drawn icons and game-specific titles:
+**Metroid Fusion / DS** and **The Legend of Zelda / A Link to the Past / DS**.
+`tools/nds_banner.py` updates all six language titles and CRC, rejecting overlap
+with executable or filesystem data.
 
-Windows preview evidence:
-
-- `artifacts/packager-windows-cli-verified/result.json`: 47/47 assertions on
-  the actual `.exe` under Wine 10, running from an isolated Unicode directory
-  with an empty PATH. It generates the exact gameplay-validated NDS hash
-  `245d9b92dffb48f854a9e2bd0f466c03b3f217c4f540950a5a284a6d12fd8505`.
-- The frozen archive contains Windows Python and its required DLLs plus the
-  two allowlisted runtime data files. Its proprietary-payload audit passes.
-  The PE header identifies a Windows x86-64 console executable.
-- Windows builder suite: 11 passed, one explicitly skipped because Wine's
-  symlink API reports success without creating a link. Atomic no-overwrite
-  races and failed-write cleanup pass. All 12 tests pass on native macOS.
-- `artifacts/packager-windows-emulator-verified/result.json`: acceptance on the
-  Windows-generated NDS using the patched Mac melonDS core. First-boot gameplay
-  evidence is reused only after exact package/core/input hash checks; repeat
-  launch, save preservation and recovery/rejection checks execute again.
-- `artifacts/packager/validation-windows.json`: consolidated evidence and
-  artifact hashes. These are Wine tests, not native Windows tests; Windows
-  10/11, NTFS symlink behavior and signed-download validation remain pending.
-
-## Before public distribution
-
-This is a working local preview, not a cleared public release. No project-wide
-redistribution license was found in the pinned GBARunner3/libtwl checkouts;
-their terms need clarification, and the remaining runtime dependency notice
-audit and this project's licensing need completion. The provenance file names
-these open issues rather than assigning an invented license to upstream code.
-
-The Mac executable currently has an ad-hoc signature. A public Mac download
-needs the intended Developer ID signing/notarization workflow and testing with
-Gatekeeper enabled. See [Apple's distribution guidance](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
-No account credentials, signing identity, upload or public publication have
-been used for this preview.
+This remains a local preview. macOS has an ad-hoc signature, not Developer ID
+signing/notarization. Windows is unsigned; native Windows game-package acceptance is
+outstanding (CI covers the ROM-free executable). See [release readiness](releasing.md) and
+[third-party notices](../release/packager/THIRD_PARTY_NOTICES.txt) for unresolved
+redistribution terms and project licensing. No publication occurs during a build.

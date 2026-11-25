@@ -1,55 +1,59 @@
-fusion-pack 0.1.0 - Windows x64 local preview
+gba-ds-pack 0.2.0 — preview
 
-Create a dual-screen Fusion NDS using your own game ROM and GBA BIOS.
-The executable includes the enhanced GBARunner3 runtime and Python runtime.
-You do not need to install Python, Docker, Wine, an emulator, or a compiler.
-Everything runs locally and offline.
+On Windows, no Wine installation is needed.
+One executable creates DS packages for Metroid Fusion and Zelda: A Link to
+the Past & Four Swords (ALttP adventure). Supply your own ROM and GBA BIOS.
+No Python, Docker, emulator or compiler installation is needed. Works offline.
+No game ROM, game graphics or BIOS is included.
 
-EXAMPLE (PowerShell, from the extracted folder)
+USAGE (Windows x64, PowerShell)
 
-  .\fusion-pack.exe "Metroid Fusion (USA).gba" --bios bios.bin -o Fusion.nds
+  .\gba-ds-pack.exe "Metroid Fusion (USA).gba" --bios bios.bin -o Fusion.nds
+  .\gba-ds-pack.exe "Zelda ALttP (USA).gba" --bios bios.bin -o Zelda.nds
 
-In Command Prompt, use fusion-pack.exe with the same arguments.
+The game is detected by SHA-1. Both supported originals are US revision 0,
+8 MiB. Run --list-games to see the exact hashes. The original 16 KiB GBA BIOS
+can be a .bin or ZIP containing exactly one such file.
 
-SUPPORTED INPUTS
+EXPERIMENTAL VARIANTS
 
-Metroid Fusion (USA), original revision, 8 MiB.
-ROM SHA-1: ca33f4348c2c05dd330d37b97e2c5a69531dfe87
-Original 16 KiB GBA BIOS (.bin or ZIP containing exactly one 16 KiB BIOS).
-No game ROM or BIOS is included in this download.
+  .\gba-ds-pack.exe "Zelda variant.gba" --bios bios.bin --game alttp --allow-unsupported-rom -o Zelda.nds
 
-OUTPUT
+Use --game fusion for Fusion variants. Unknown hashes are rejected by default.
+The override still checks game, region, revision, size, header and protected
+adapter code/data. Zelda graphics used by the adapter also have bounds checks.
+It does not support arbitrary hacks, expanded ROMs, other regions or revisions.
+Passing these checks is not a compatibility guarantee. Some cosmetic or text
+variants may work; engine/inventory changes are deliberately rejected.
 
-Use -o "C:\Users\YourName\Desktop\Fusion.nds" to choose a destination.
-Without -o, Fusion.nds is saved in your current working directory.
-Existing files are never overwritten; choose a new output name to rebuild.
-Your original ROM and BIOS are never modified.
+Each distinct ROM SHA-1 has separate extracted files and saves. An experimental
+variant never automatically imports the original game's save. Integrity checks
+still verify the actual supplied ROM during extraction and on subsequent boots.
 
-  .\fusion-pack.exe --help
-  .\fusion-pack.exe --list-games
-  .\fusion-pack.exe --inspect Fusion.nds
+OUTPUT AND DS USE
 
---json prints machine-readable results. --manifest also saves a build report.
+Use -o to choose any destination. Defaults are Fusion.nds or Zelda.nds in your
+current directory. Existing output files are never overwritten; inputs are read
+only. --manifest writes a build report; --json prints machine-readable results.
+--inspect FILE.nds verifies a package. --help lists all options.
 Exit codes: 0 success, 1 input/file error, 2 usage error, 130 cancellation.
 
-ON THE DS
+Copy the generated NDS to the flashcart SD root as Fusion.nds or Zelda.nds.
+A compatible DLDI launcher and writable SD are required. Leave about 9 MiB extra
+free for extraction. Later launches verify and reuse the extracted files.
+Keep _fusion and _alttp when replacing packages. Saves live at:
 
-Copy the generated file to the flashcart SD root as Fusion.nds. Keep your
-existing _fusion folder and saves. First launch extracts the game and BIOS;
-later launches reuse them. Leave about 9 MiB free beyond the NDS for extraction.
-A compatible DLDI flashcart launcher and writable SD card are required.
-The included runtime is Hardware Test 5, briefly identified during startup.
-Game saves live on the flashcart SD, separately from the NDS.
+  _fusion/<actual ROM SHA-1>/rom.sav
+  _alttp/<actual ROM SHA-1>/rom.sav
 
-PLATFORM AND RELEASE STATUS
+Verified originals retain their previous save paths. Do not redistribute your
+generated NDS; it contains your game and BIOS.
 
-This is an x64 Windows executable. The developer's Mac build/test environment
-uses Windows CPython under Wine; Wine is not needed by Windows end users.
-Native Windows 10/11 validation remains a separate release check.
-The executable is not Authenticode-signed; publisher reputation has not been
-established.
+RELEASE STATUS
 
-Public release still requires clarification of GBARunner3/libtwl distribution
-terms, a complete dependency notice audit and project licensing. See
-THIRD_PARTY_NOTICES.txt. This archive contains no Nintendo ROM or BIOS; do not
-add your generated game-containing NDS to the public packager download.
+Apple Silicon build: ad-hoc signed, not Developer ID signed or notarized.
+Windows x64 has a separate executable. Local packaging tests run under Wine;
+CI tests the ROM-free CLI on native Windows. Game-package acceptance with user
+inputs and Authenticode signing remain outstanding.
+Redistribution terms and project licensing remain unresolved as described in
+THIRD_PARTY_NOTICES.txt. This is a preview; the documented licensing findings remain unresolved.

@@ -1,0 +1,20 @@
+[
+  {
+    "frame": 19001,
+    "region": "main",
+    "offset": 8993,
+    "hex": "01"
+  },
+  {
+    "frame": 19001,
+    "region": "main",
+    "offset": 9004,
+    "hex": "01"
+  },
+  {
+    "frame": 19001,
+    "region": "main",
+    "offset": 9038,
+    "hex": "80"
+  }
+]

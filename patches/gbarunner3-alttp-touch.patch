@@ -1,0 +1,157 @@
+--- a/code/core/common/SystemIpcCommand.h
++++ b/code/core/common/SystemIpcCommand.h
+@@ -3,5 +3,6 @@
+ typedef enum
+ {
+     SYSTEM_IPC_CMD_SET_TOP_BACKLIGHT,
+-    SYSTEM_IPC_CMD_SET_BOTTOM_BACKLIGHT
++    SYSTEM_IPC_CMD_SET_BOTTOM_BACKLIGHT,
++    SYSTEM_IPC_CMD_SET_TOUCH_BUFFER
+ } SystemIpcCommand;
+--- a/code/core/arm9/source/SystemIpc.cpp
++++ b/code/core/arm9/source/SystemIpc.cpp
+@@ -26,3 +26,11 @@
+     while (ipc_isRecvFifoEmpty());
+     ipc_recvWordDirect();
+ }
++
++// Register a cache-line-aligned runtime-RAM mailbox once, before guest execution.
++void sysipc_setTouchBuffer(u32* buffer)
++{
++    sendSystemIpcMessage(SYSTEM_IPC_CMD_SET_TOUCH_BUFFER, (u32)buffer >> 5);
++    while (ipc_isRecvFifoEmpty());
++    ipc_recvWordDirect();
++}
+--- a/code/core/arm7/source/main.cpp
++++ b/code/core/arm7/source/main.cpp
+@@ -103,6 +103,10 @@
+     sys_setSoundPower(true);
+ 
+     readUserSettings();
++    // Cache firmware calibration before ARM9 reuses high main RAM for ROM data.
++    touchInit();
++    extern void zeldaInitializeTouchMutex();
++    zeldaInitializeTouchMutex();
+     pmic_setPowerLedBlink(PMIC_CONTROL_POWER_LED_BLINK_NONE);
+ 
+     sio_setGpioSiIrq(false);
+@@ -132,8 +134,11 @@
+     notifyArm7Ready();
+ }
+ 
++extern void zeldaUpdateTouch();
++
+ static void updateArm7IdleState()
+ {
++    zeldaUpdateTouch();
+     checkMcuIrq();
+     sGbaSaveIpcService.Update();
+ 
+--- a/code/core/arm9/gbarunner9.ld
++++ b/code/core/arm9/gbarunner9.ld
+@@ -37,8 +37,9 @@
+ 	.text :   /* ALIGN (4): */
+ 	{
++		*(.zelda.hot)
+-		*(EXCLUDE_FILE(*.itcm* *.vectors* *.twl*) .text)
++		*(EXCLUDE_FILE(*.itcm* *.vectors* *.twl* FusionScreen.size.o) .text)
+ 		*(EXCLUDE_FILE(*.itcm* *.vectors* *.twl*) .stub)
+-		*(EXCLUDE_FILE(*.itcm* *.vectors* *.twl*) .text.*)
++		*(EXCLUDE_FILE(*.itcm* *.vectors* *.twl* FusionScreen.size.o) .text.*)
+ 		KEEP (*(SORT_NONE(.init)))
+-		*(.text.*)
++		*(EXCLUDE_FILE(FusionScreen.size.o) .text.*)
+ 		*(.stub)
+@@ -251,3 +251,4 @@
+ 	    /* Map labels and startup-only color tables live in runtime RAM. */
++	    *FusionScreen.size.o(.text .text.*)
+ 	    *FusionScreen.size.o(.rodata .rodata.*)
+ 	    *ColorProfiles.o(.rodata .rodata.*)
+--- a/code/core/arm9/source/MemoryProtectionConfiguration.cpp
++++ b/code/core/arm9/source/MemoryProtectionConfiguration.cpp
+@@ -14,4 +14,5 @@
+     MemoryProtectionRegionBuilder(0x02000000, MPU_REGION_SIZE_4MB)
+         .WithDataAccessPermission(MPU_ACCESS_PERMISSION_PRIV_READ_WRITE)
++        .WithInstructionAccessPermission(MPU_ACCESS_PERMISSION_PRIV_READ_WRITE)
+         .WithDataCache()
+         .ApplyToRegion(MPU_REGION_1);
+--- a/code/core/arm9/source/crt0.s
++++ b/code/core/arm9/source/crt0.s
+@@ -78,3 +78,14 @@
+ ewram_done:
++    // Publish the relocated ARM UI code before any uncached instruction fetch.
++    // Leave the instruction-cache policy used by the GBA VM unchanged.
++    ldr r0,= __ewram_start
++    ldr r1,= __ewram_end
++1:
++    mcr p15, 0, r0, c7, c10, 1
++    add r0, r0, #32
++    cmp r0, r1
++    blo 1b
++    mov r0, #0
++    mcr p15, 0, r0, c7, c10, 4
+ 
+     // clear bss
+--- a/code/core/arm7/source/IpcServices/SystemIpcService.cpp
++++ b/code/core/arm7/source/IpcServices/SystemIpcService.cpp
+@@ -1,20 +1,60 @@
+ #include "common.h"
+ #include <libtwl/spi/spiPmic.h>
+ #include "SystemIpcService.h"
++#include <libtwl/rtos/rtosIrq.h>
++#include <libtwl/rtos/rtosMutex.h>
++#include <nds/arm7/touch.h>
++
++static volatile u32* sTouch;
++static u32 sSequence;
++static rtos_mutex_t sTouchMutex;
++
++void zeldaInitializeTouchMutex() { rtos_createMutex(&sTouchMutex); }
++
++void zeldaUpdateTouch()
++{
++    if (!sTouch) return;
++    // Serialize SPI users while allowing the sound timer/thread to preempt.
++    rtos_lockMutex(&sTouchMutex);
++    touchPosition pos = {};
++    bool down=touchPenDown();
++    if (down) touchReadXY(&pos);
++    down=down && pos.rawx && pos.rawy && pos.px<256 && pos.py<192;
++    u32 packet=((++sSequence & 0x7FFF)<<17) | (down?0x10000:0) | (pos.py<<8) | pos.px;
++    *sTouch=packet;
++    rtos_unlockMutex(&sTouchMutex);
++}
+ 
+ void SystemIpcService::HandleMessage(u32 data)
+ {
+     switch (data & 0xF)
+     {
++        case SYSTEM_IPC_CMD_SET_TOUCH_BUFFER:
++        {
++            u32 address=(data >> 4) << 5;
++            if (address>=0x02040000 && address<0x02200000)
++            {
++                u32 irq=rtos_disableIrqs();
++                sTouch=(volatile u32*)address;
++                *sTouch=0;
++                rtos_restoreIrqs(irq);
++            }
++            SendResponseMessage(0);
++            break;
++        }
+         case SYSTEM_IPC_CMD_SET_TOP_BACKLIGHT:
+         {
++            rtos_lockMutex(&sTouchMutex);
+             pmic_setTopBacklightEnable((data >> 4) & 1);
++            rtos_unlockMutex(&sTouchMutex);
+             SendResponseMessage(0);
+             break;
+         }
+         case SYSTEM_IPC_CMD_SET_BOTTOM_BACKLIGHT:
+         {
++            rtos_lockMutex(&sTouchMutex);
+             pmic_setBottomBacklightEnable((data >> 4) & 1);
++            rtos_unlockMutex(&sTouchMutex);
+             SendResponseMessage(0);
+             break;
+         }

@@ -5,6 +5,7 @@
 #include <libtwl/sys/sysPower.h>
 #include "SystemIpc.h"
 #include "FusionScreen.h"
+#include "DisplayAudio.h"
 #include "Fat/ff.h"
 #include <memory>
 
@@ -93,6 +94,7 @@ static bool loadTiles()
 
 void fusionScreenInitialize()
 {
+    displayAudioInitialize();
     sys_setMainEngineToTopScreen();
     sys_set2DGraphicsSubPower(true);
     sysipc_setTopBacklight(true);
@@ -170,6 +172,7 @@ static void roomMask(unsigned px, unsigned py)
     sRoomMask[py] = 1u << px;
     while (head < tail)
     {
+        displayServiceAudio();
         unsigned at = sQueue[head++], x = at & 31, y = at >> 5;
         for (unsigned d = 0; d < 4; ++d)
         {
@@ -236,6 +239,7 @@ static void roomMask(unsigned px, unsigned py)
     if (top > 12) top = 12;
     for (unsigned i = 0; i < 640; ++i)
     {
+        if((i&15)==0) displayServiceAudio();
         unsigned x = i & 31, y = (i >> 5) + top;
         u16 tile = visited[y * 32 + x];
         if ((tile & 1023) >= 448 || (tile & 1023) == 160 || (tile >> 12) > 2) tile = Blank;
@@ -266,9 +270,15 @@ extern "C" [[gnu::section(".itcm")]] void fusionScreenVBlank()
         "add %0, %0, #32\n"
         "add %1, %1, #32\n"
         "subs r2, r2, #1\n"
+        "tst r2, #15\n"
+        "bne 1b\n"
+        "push {r0-r3,r12,lr}\n"
+        "bl displayServiceAudio\n"
+        "pop {r0-r3,r12,lr}\n"
+        "cmp r2, #0\n"
         "bne 1b\n"
         : "+r"(src), "+r"(dst) : : "r2", "r3", "r4", "r5", "r6", "r7",
-          "r8", "r9", "r10", "r11", "cc", "memory");
+          "r8", "r9", "r10", "r11", "lr", "cc", "memory");
     REG_DISPCAPCNT = 0x80330000; // engine A -> D, 256x192, every frame
     if ((++sTicks & 7) == 0) updateMap();
 }

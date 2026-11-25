@@ -1,0 +1,13 @@
+--- a/code/core/arm9/source/Emulator/HBlankIrq.s
++++ b/code/core/arm9/source/Emulator/HBlankIrq.s
+@@ -11,5 +11,10 @@
+ /// @param lr Return address.
+ arm_func emu_hblankIrq
++#ifndef GBAR3_TEST
++    ldr pc,= zeldaWorldMapHblank
++.global zeldaWorldMapHblankReturn
++zeldaWorldMapHblankReturn:
++#endif
+     // Don't tigger hblank irq on scanlines beyond the gba screen
+     mov r13, #0x04000000
+     ldrh lr, [r13, #6]

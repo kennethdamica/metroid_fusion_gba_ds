@@ -10,8 +10,9 @@ static FIL sPackage;
 static u8 sBuffer[8192];
 static char sPaths[5][128];
 static u32 sExtracted, sReused;
-static const char* const sRoot = "fat:/_fusion/ca33f4348c2c05dd330d37b97e2c5a69531dfe87";
-static const char* const sHashes[] = {
+static char sRoot[64];
+static char sRomHash[41];
+static const char* sHashes[] = {
     "ca33f4348c2c05dd330d37b97e2c5a69531dfe87",
     "300c20df6731a33952ded8c436f7f186d25d3492",
     "5f36b2ea290645ee34d943220a14b54ee5ea5be5"
@@ -19,7 +20,8 @@ static const char* const sHashes[] = {
 static const u32 sSizes[] = {8388608,16384,3};
 static const char* const sNames[] = {"rom.gba","bios.bin","config.json"};
 struct Range { u32 start, end; };
-struct Manifest { char magic[8]; u32 version, abi; u8 hashes[3][20]; };
+struct Manifest { char magic[8]; u32 version, abi; u8 hashes[3][20]; u32 flags; };
+static_assert(sizeof(Manifest)==80, "Package manifest layout");
 
 [[noreturn]] static void fail(u32 code, const char* message)
 {
@@ -104,7 +106,7 @@ static void extract(const Range& range, unsigned index)
     u8 digest[20]; sha.finish(digest);
     require(f_sync(&file),"Cannot sync extracted data.");
     require(f_close(&file),"Cannot close extracted data.");
-    if (!hashMatches(digest,sHashes[index])) fail(4,"Payload hash mismatch.\nRebuild this NDS on your Mac.");
+    if (!hashMatches(digest,sHashes[index])) fail(4,"Payload hash mismatch.\nRebuild this NDS.");
     // Verify the stored bytes, not only the incoming package stream.
     if (!verifyFile(temporary,sSizes[index],sHashes[index])) fail(5,"SD verification failed.");
     FRESULT removed=f_unlink(target);
@@ -117,7 +119,7 @@ static void extract(const Range& range, unsigned index)
 void packagePrepare(const char* launchPath, bool storageReady)
 {
     consoleDemoInit();
-    iprintf("FUSION DS PACKAGE v1\n\n");
+    iprintf("FUSION DS PACKAGE v2\n\n");
     if (!storageReady) fail(1,"DLDI storage unavailable.\nUse a compatible flashcart.");
     require(f_mount(&sFs,"fat:",1),"Cannot mount flashcart SD.");
     // Normal launchers provide argv[0]. A fixed root name supports launchers
@@ -135,21 +137,36 @@ void packagePrepare(const char* launchPath, bool storageReady)
     Range ranges[4];
     require(f_lseek(&sPackage,fatOffset),"Invalid file table offset.");
     readExact(&sPackage,ranges,sizeof(ranges));
+    u32 manifestSize=ranges[0].end-ranges[0].start;
+    if (manifestSize!=76 && manifestSize!=80) fail(8,"Invalid manifest size.");
     u32 previous=fatOffset+32;
     for (int i=0;i<4;++i)
     {
         if (ranges[i].start<previous || ranges[i].end<ranges[i].start || ranges[i].end>size ||
-            ranges[i].end-ranges[i].start!=(i==0?sizeof(Manifest):sSizes[i-1]))
+            ranges[i].end-ranges[i].start!=(i==0?manifestSize:sSizes[i-1]))
             fail(8,"Invalid package payload bounds.");
         previous=ranges[i].end;
     }
-    Manifest manifest;
+    Manifest manifest={};
     require(f_lseek(&sPackage,ranges[0].start),"Invalid manifest offset.");
-    readExact(&sPackage,&manifest,sizeof(manifest));
-    if (memcmp(manifest.magic,"FUSPKG01",8) || manifest.version!=1 || manifest.abi!=1)
+    readExact(&sPackage,&manifest,manifestSize);
+    if (memcmp(manifest.magic,"FUSPKG01",8) ||
+        !((manifest.version==1 && manifest.abi==1 && manifestSize==76) ||
+          (manifest.version==2 && manifest.abi==2 && manifestSize==80)) || (manifest.flags&~1u))
         fail(8,"Unsupported package version.");
-    for (int i=0;i<3;++i)
-        if (!hashMatches(manifest.hashes[i],sHashes[i])) fail(4,"Unsupported ROM/BIOS/config.");
+    bool knownRom=hashMatches(manifest.hashes[0],sHashes[0]);
+    if (knownRom == bool(manifest.flags&1)) fail(4,"ROM compatibility flag mismatch.");
+    for (int i=1;i<3;++i)
+        if (!hashMatches(manifest.hashes[i],sHashes[i])) fail(4,"Unsupported BIOS/config.");
+    static const char digits[]="0123456789abcdef";
+    for (int i=0;i<20;++i) {
+        sRomHash[2*i]=digits[manifest.hashes[0][i]>>4];
+        sRomHash[2*i+1]=digits[manifest.hashes[0][i]&15];
+    }
+    sRomHash[40]=0;
+    sHashes[0]=sRomHash;
+    snprintf(sRoot,sizeof(sRoot),"fat:/_fusion/%s",sRomHash);
+    if (manifest.flags&1) iprintf("Experimental ROM variant\n\n");
     directory("fat:/_fusion");directory(sRoot);
     char dataPath[100];snprintf(dataPath,sizeof(dataPath),"%s/v1",sRoot);directory(dataPath);
     for (int i=0;i<3;++i) snprintf(sPaths[i+1],128,"%s/%s",dataPath,sNames[i]);

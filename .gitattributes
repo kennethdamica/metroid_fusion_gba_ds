@@ -11,5 +11,7 @@
 *.h text eol=lf
 *.s text eol=lf
 *.inc text eol=lf
-*.patch text eol=lf
+# Unified-diff context lines carry required leading spaces, including blank lines.
+*.patch text eol=lf whitespace=-blank-at-eol,-space-before-tab
 Makefile text eol=lf
+*.txt text eol=lf

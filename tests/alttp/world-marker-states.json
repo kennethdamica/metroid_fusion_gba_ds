@@ -1,0 +1,44 @@
+[
+  {
+    "frame": 5550,
+    "region": "shared",
+    "offset": 14480,
+    "hex": "03"
+  },
+  {
+    "frame": 5550,
+    "region": "main",
+    "offset": 9044,
+    "hex": "00"
+  },
+  {
+    "frame": 5800,
+    "region": "main",
+    "offset": 9044,
+    "hex": "07"
+  },
+  {
+    "frame": 6050,
+    "region": "shared",
+    "offset": 14480,
+    "hex": "07"
+  },
+  {
+    "frame": 6050,
+    "region": "shared",
+    "offset": 11254,
+    "hex": "40"
+  },
+  {
+    "frame": 6050,
+    "region": "main",
+    "offset": 9050,
+    "hex": "00"
+  },
+  {
+    "frame": 6300,
+    "region": "main",
+    "offset": 9050,
+    "hex": "7f"
+  }
+]

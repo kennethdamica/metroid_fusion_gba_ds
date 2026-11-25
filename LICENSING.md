@@ -8,9 +8,9 @@ not establish permission where no applicable license has been identified.
 
 Known license texts are collected under `licenses/`, and the melonDS patches
 have scoped GPL attribution and modification dates in [patches/README.md](patches/README.md).
-Future packager builds include the collected texts. The refreshed preview
-archives in `artifacts/packager-with-notices/` add them to the previously tested
-executables without changing executable or runtime bytes.
+Packager builds and automated release ZIPs include the collected texts.
+The original notice-only refresh is retained locally under
+`artifacts/packager-with-notices/` for historical reference.
 
 ## Source publication
 
@@ -43,9 +43,9 @@ coverage and applicable Microsoft runtime conditions. Known source obligations
 and remaining items are listed in the review. PyInstaller's bootloader exception
 does not remove separate dependency obligations.
 
-The original preview ZIPs remain unchanged. Separately refreshed ZIPs include
-the collected notices and a packaging-update record. Remaining audit gaps are
-documented rather than marked complete.
+The original local preview ZIPs remain unchanged. Current builds collect the
+known notices alongside the executable and provenance report. Remaining audit
+gaps are documented rather than marked complete.
 
 ## Scope and next steps
 

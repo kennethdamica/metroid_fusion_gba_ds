@@ -7,6 +7,8 @@
 | [Packager CLI](packager-cli.md) | Input validation, output behavior, frozen builds and recorded evidence |
 | [Troubleshooting](troubleshooting.md) | Input errors, flashcart boot, emulator setup and saves |
 | [Live map adapter](fusion-map.md) | Memory layout, display resources, map rendering and coverage |
+| [Zelda inventory and maps](alttp-inventory.md) | Build, package, play and test the live touch inventory and map prototype |
+| [Display/audio timing](display-audio.md) | Sound refill checkpoints, Zelda redraw caching and audio diagnostics |
 | [Hardware investigation](hardware-debug.md) | DSpico/3DS boot failure and ARM interworking fix |
 | [Release readiness](releasing.md) | Source review, binary packaging, licensing and platform checks |
 | [Licensing review](licensing-review.md) | Findings, upstream permissions, source/binary obligations and proposed resolution order |

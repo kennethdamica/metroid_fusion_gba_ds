@@ -27,6 +27,7 @@ python3.13 -m venv .venv
 .venv/bin/python -m pip install -r requirements-packager.txt
 .venv/bin/python tools/build_baseline.py --clean
 .venv/bin/python tools/build_dual_screen.py --hardware-diagnostics --clean
+.venv/bin/python tools/build_dual_screen.py --game alttp --package-template --clean
 ```
 
 The baseline script fetches the pinned GBARunner3 checkout and its submodule.
@@ -37,7 +38,8 @@ The validated template is
 `artifacts/hardware-runtime/sdcard/FusionTemplate.nds`. Use
 `--hardware-diagnostics`: the separate non-diagnostic package template has a
 known execution stall and is not the release template. The
-[runtime lock](../release/packager/runtime-lock.json) pins Hardware Test 5.
+[runtime lock](../release/packager/runtime-lock.json) pins both ABI 2 templates.
+Zelda uses `artifacts/alttp-package-runtime/sdcard/ZeldaTemplate.nds`.
 Do not update that lock just to make a changed build pass.
 
 ## Build standalone packagers
@@ -54,7 +56,7 @@ For a Windows x64 executable built locally on the Mac:
 .venv/bin/python tools/build_windows_packager.py --output artifacts/packager
 ```
 
-Both use the validated runtime above. Outputs are placed under
+Both include the two validated game runtimes above. Outputs are placed under
 `artifacts/packager/macos-arm64/` and `artifacts/packager/windows-x86_64/`, with
 platform-specific preview ZIPs beside them. Existing platform output directories
 are refused; use `--output artifacts/packager-next` for a subsequent build.
@@ -70,12 +72,14 @@ already-built template and the limits of Wine-based testing.
 Supply your own original US Fusion ROM and original GBA BIOS. The end-user CLI
 accepts explicit input paths; local regression scripts expect
 `Metroid Fusion (USA).gba` and `gba_bios.zip` at the repository root.
+Zelda and unified executable tests also expect
+`Legend of Zelda, The - A Link to the Past & Four Swords (USA).gba`.
 All game/firmware inputs and generated binaries are ignored.
 
 ```sh
-.venv/bin/python tools/fusion_pack.py "Metroid Fusion (USA).gba" \
+.venv/bin/python tools/gba_ds_pack.py "Metroid Fusion (USA).gba" \
   --bios gba_bios.zip -o artifacts/my-package/Fusion.nds
-.venv/bin/python tools/fusion_pack.py --inspect artifacts/my-package/Fusion.nds
+.venv/bin/python tools/gba_ds_pack.py --inspect artifacts/my-package/Fusion.nds
 .venv/bin/python -m unittest discover -s tests/package -v
 ```
 
@@ -86,7 +90,7 @@ Test the actual frozen Mac executable outside the checkout with an empty PATH:
 
 ```sh
 .venv/bin/python tools/test_packager_cli.py \
-  --executable artifacts/packager/macos-arm64/fusion-pack \
+  --executable artifacts/packager/macos-arm64/gba-ds-pack \
   --output artifacts/my-cli-test
 ```
 

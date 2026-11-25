@@ -23,14 +23,19 @@ class PublicCliTests(unittest.TestCase):
     def test_version(self):
         result = self.run_cli('--version')
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout.strip(), 'fusion-pack 0.1.0')
+        self.assertEqual(result.stdout.strip(), 'gba-ds-pack 0.2.0')
 
     def test_supported_game_list_is_json(self):
         result = self.run_cli('--list-games', '--json')
         self.assertEqual(result.returncode, 0)
         games = json.loads(result.stdout)
-        self.assertEqual(len(games), 1)
+        self.assertEqual(len(games), 2)
         self.assertEqual(games[0]['sha1'], 'ca33f4348c2c05dd330d37b97e2c5a69531dfe87')
+
+    def test_override_requires_explicit_game(self):
+        result = self.run_cli('unknown.gba', '--bios', 'bios.bin', '--allow-unsupported-rom')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('requires --game', result.stderr)
 
     def test_missing_arguments_are_usage_error(self):
         result = self.run_cli()

@@ -19,7 +19,7 @@ executables and a packaging-update record.
 
 | File | Source and scope |
 | --- | --- |
-| [libnds-zlib.txt](libnds-zlib.txt) | libnds 1.8.3-1, `/opt/devkitpro/libnds/libnds_license.txt` in the pinned devkitARM image |
+| [libnds-zlib.txt](libnds-zlib.txt) | libnds 1.8.3-1, `/opt/devkitpro/libnds/libnds_license.txt` in the pinned devkitARM image; the modified touch driver also retains its per-file notice |
 | [fatfs.txt](fatfs.txt) | FatFs R0.13c notice from pinned GBARunner3 `code/core/arm9/source/Fat/ff.c` |
 | [tlsf-bsd.txt](tlsf-bsd.txt) | TLSF 3.1 notice block from pinned GBARunner3 `code/core/arm9/source/Core/Heap/tlsf.h` |
 | [mini-printf-bsd.txt](mini-printf-bsd.txt) | Copyright/conditions/disclaimer from pinned GBARunner3 `code/libs/mini-printf/mini-printf.c` |

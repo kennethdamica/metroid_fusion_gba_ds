@@ -27,3 +27,5 @@ jobs:
         run: python tools/check_repository.py
       - name: Test public CLI without game data
         run: python -m unittest discover -s tests/public -v
+      - name: Test menu banners without game data
+        run: python -m unittest discover -s tests/package -p test_banner.py -v

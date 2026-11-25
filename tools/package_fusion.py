@@ -10,6 +10,9 @@ import sys
 import tempfile
 import zipfile
 from fusion_profile import FUSION_SHA1, BIOS_SHA256, ROM_BYTES
+from game_profiles import FUSION, ALTTP
+from rom_compatibility import validate_rom
+from nds_banner import crc16, set_menu_banner, TITLES
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RUNTIME = ROOT / 'artifacts/hardware-runtime'
@@ -34,15 +37,6 @@ def verify_melonds_copy(original, copied):
             and not any(b[len(a):]))
 
 
-def crc16(data):
-    crc = 0xFFFF
-    for byte in data:
-        crc ^= byte
-        for _ in range(8):
-            crc = (crc >> 1) ^ (0xA001 if crc & 1 else 0)
-    return crc
-
-
 def read_bios(path):
     if not path.is_file() or path.stat().st_size > 1024 * 1024:
         raise ValueError('Choose a 16 KiB GBA BIOS file or a small ZIP containing it')
@@ -58,7 +52,7 @@ def read_bios(path):
     return data
 
 
-def inspect_package(path):
+def inspect_package(path, *, profile=FUSION):
     if path.stat().st_size > 16 * 1024 * 1024:
         raise ValueError('File is too large for a Fusion NDS package')
     data = path.read_bytes()
@@ -80,20 +74,29 @@ def inspect_package(path):
         payloads[name] = data[start:end]
         previous = end
     manifest = payloads['manifest.bin']
-    if len(manifest) != 76 or manifest[:16] != MAGIC + struct.pack('<II', 1, 1):
+    if profile is None:
+        profile = next((p for p in (FUSION, ALTTP) if manifest[:8] == p.magic), None)
+    if profile is None or len(manifest) not in (76, 80) or manifest[:8] != profile.magic:
+        raise ValueError('Unsupported package manifest')
+    version, abi = struct.unpack_from('<II', manifest, 8)
+    flags = struct.unpack_from('<I', manifest, 76)[0] if len(manifest) == 80 else 0
+    if (version, abi, len(manifest)) not in ((1, 1, 76), (2, 2, 80)) or flags & ~1:
         raise ValueError('Unsupported package manifest')
     for i, name in enumerate(NAMES[1:]):
         if hashlib.sha1(payloads[name]).digest() != manifest[16+20*i:36+20*i]:
             raise ValueError(f'Payload hash mismatch: {name}')
-    if hashlib.sha1(payloads['rom.gba']).hexdigest() != FUSION_SHA1:
-        raise ValueError('Only the verified US Fusion ROM is supported')
+    compatibility = validate_rom(payloads['rom.gba'], profile, allow_unsupported=bool(flags & 1))
+    if bool(flags & 1) != compatibility['experimental']:
+        raise ValueError('ROM compatibility flag disagrees with its identity')
+    data_root = Path(profile.directory) / compatibility['rom_sha1']
     if hashlib.sha256(payloads['bios.bin']).hexdigest() != BIOS_SHA256 or payloads['config.json'] != CONFIG:
         raise ValueError('Unsupported BIOS/configuration')
     if struct.unpack_from('<I', data, 0x80)[0] != len(data):
         raise ValueError('NDS used size disagrees with file size')
     return dict(package_sha256=hashlib.sha256(data).hexdigest(), package_bytes=len(data),
                 payloads={n: dict(bytes=len(b), sha256=hashlib.sha256(b).hexdigest()) for n,b in payloads.items()},
-                data_directory=DATA_DIR.as_posix(), save_path=(DATA_ROOT / 'rom.sav').as_posix())
+                game=profile.key, format_version=version, **compatibility,
+                data_directory=(data_root / 'v1').as_posix(), save_path=(data_root / 'rom.sav').as_posix())
 
 
 def publish_new(source, destination):
@@ -128,22 +131,27 @@ def stage_file(destination, data):
     return path
 
 
-def build(runtime_dir, rom_path, bios_path, output, *, write_manifest=True):
+def build(runtime_dir, rom_path, bios_path, output, *, write_manifest=True, profile=FUSION, allow_unsupported_rom=False):
     sidecar = output.with_suffix('.manifest.json')
     if os.path.lexists(output) or (write_manifest and os.path.lexists(sidecar)):
         raise ValueError('Output must be new; existing packages are never overwritten')
     if not rom_path.is_file() or rom_path.stat().st_size != ROM_BYTES:
-        raise ValueError('Only the verified US Fusion ROM is supported (8 MiB, original revision)')
+        raise ValueError(f'Only the verified US {profile.title} ROM is supported (8 MiB, original revision)')
     rom, bios = rom_path.read_bytes(), read_bios(bios_path)
-    if hashlib.sha1(rom).hexdigest() != FUSION_SHA1:
-        raise ValueError('Only the verified US Fusion ROM is supported')
-    template = runtime_dir / 'sdcard/FusionTemplate.nds'
+    compatibility = validate_rom(rom, profile, allow_unsupported=allow_unsupported_rom)
+    template = runtime_dir / 'sdcard' / profile.template
     build_manifest = json.loads((runtime_dir / 'manifest.json').read_text())
+    if build_manifest.get('game', 'fusion') != profile.key:
+        raise ValueError('Runtime template belongs to another game')
     data = bytearray(template.read_bytes())
-    if build_manifest.get('package_abi') != 1 or hashlib.sha256(data).hexdigest() != build_manifest['rom_sha256']:
+    abi = build_manifest.get('package_abi')
+    if abi not in (1, 2) or hashlib.sha256(data).hexdigest() != build_manifest['rom_sha256']:
         raise ValueError('Runtime template does not match its build manifest/ABI')
+    if compatibility['experimental'] and abi != 2:
+        raise ValueError('Experimental ROMs require a rebuilt ABI 2 runtime template')
     if len(data) < 0x200 or crc16(data[:0x15E]) != struct.unpack_from('<H', data, 0x15E)[0]:
         raise ValueError('Invalid template header')
+    set_menu_banner(data, profile.key)
     # Preserve both executable load segments and DLDI patch space. The game is
     # NitroFS data, outside the ARM9 segment, never an 8 MiB RAM load.
     def align(n):
@@ -156,7 +164,9 @@ def build(runtime_dir, rom_path, bios_path, output, *, write_manifest=True):
     align(4)
     fat = len(data)
     data.extend(b'\0'*32)
-    manifest = MAGIC + struct.pack('<II', 1, 1) + b''.join(hashlib.sha1(b).digest() for b in (rom,bios,CONFIG))
+    manifest = profile.magic + struct.pack('<II', abi, abi) + b''.join(hashlib.sha1(b).digest() for b in (rom,bios,CONFIG))
+    if abi == 2:
+        manifest += struct.pack('<I', int(compatibility['experimental']))
     for i, payload in enumerate((manifest,rom,bios,CONFIG)):
         align(512)
         start = len(data)
@@ -169,16 +179,16 @@ def build(runtime_dir, rom_path, bios_path, output, *, write_manifest=True):
     while (128*1024 << capacity) < len(data):
         capacity += 1
     data[0x14] = capacity
-    data[:12] = b'FUSION DS   '
+    data[:12] = profile.nds_title
     struct.pack_into('<H',data,0x15E,crc16(data[:0x15E]))
     output.parent.mkdir(parents=True,exist_ok=True)
     staged = stage_file(output, data)
     staged_report = None
     published_report = False
     try:
-        report = inspect_package(staged)
-        report.update(format_version=1, runtime=build_manifest,
-                      launch_without_argv='Place the file at SD root as Fusion.nds',
+        report = inspect_package(staged, profile=profile)
+        report.update(runtime=build_manifest, menu_title=TITLES[profile.key],
+                      launch_without_argv=f'Place the file at SD root as {profile.filename}',
                       first_launch='Extracts verified ROM/BIOS/config. Existing saves are never replaced.')
         if write_manifest:
             staged_report = stage_file(sidecar, (json.dumps(report, indent=2)+'\n').encode())

@@ -1,0 +1,86 @@
+[
+  {
+    "frame": 21416,
+    "dungeon": 0,
+    "floor": -1,
+    "room": 17
+  },
+  {
+    "frame": 21440,
+    "dungeon": 1,
+    "floor": -3,
+    "room": 128
+  },
+  {
+    "frame": 21464,
+    "dungeon": 2,
+    "floor": 0,
+    "room": 153
+  },
+  {
+    "frame": 21488,
+    "dungeon": 3,
+    "floor": -1,
+    "room": 115
+  },
+  {
+    "frame": 21512,
+    "dungeon": 4,
+    "floor": 1,
+    "room": 224
+  },
+  {
+    "frame": 21536,
+    "dungeon": 5,
+    "floor": -2,
+    "room": 102
+  },
+  {
+    "frame": 21560,
+    "dungeon": 6,
+    "floor": -1,
+    "room": 90
+  },
+  {
+    "frame": 21584,
+    "dungeon": 7,
+    "floor": -2,
+    "room": 145
+  },
+  {
+    "frame": 21608,
+    "dungeon": 8,
+    "floor": -2,
+    "room": 41
+  },
+  {
+    "frame": 21632,
+    "dungeon": 9,
+    "floor": -7,
+    "room": 222
+  },
+  {
+    "frame": 21656,
+    "dungeon": 10,
+    "floor": 0,
+    "room": 135
+  },
+  {
+    "frame": 21680,
+    "dungeon": 11,
+    "floor": -2,
+    "room": 68
+  },
+  {
+    "frame": 21704,
+    "dungeon": 12,
+    "floor": -3,
+    "room": 164
+  },
+  {
+    "frame": 21728,
+    "dungeon": 13,
+    "floor": -1,
+    "room": 28
+  }
+]

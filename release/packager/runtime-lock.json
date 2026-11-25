@@ -1,12 +1,25 @@
 {
-  "name": "Fusion Hardware Test 5",
-  "package_abi": 1,
-  "template_sha256": "95cc5a93b9a4b529635259c239197f6d332fe6ec9e756a8a8a4317da655e5200",
-  "reference_package_sha256": "245d9b92dffb48f854a9e2bd0f466c03b3f217c4f540950a5a284a6d12fd8505",
-  "source_runtime": "artifacts/hardware-runtime",
-  "evidence": [
-    "artifacts/screen-framing-dev/test2/first-boot/result.json",
-    "artifacts/screen-framing-dev/test2/result.json",
-    "artifacts/screen-framing-dev/sectors-verified/result.json"
-  ]
+  "name": "GBA DS 0.2.0: Fusion and Zelda, variant-aware extraction",
+  "games": {
+    "fusion": {
+      "package_abi": 2,
+      "template_sha256": "79eaf25012438adc9daf0f8ca66f2d1dbd91f46c0624eb1e962b323b3930b1d2",
+      "reference_package_sha256": "c98ec06ee7a84d3900319acc80376750d2b53d8880fdfc08bd06c6d0f3e457fa",
+      "source_runtime": "artifacts/hardware-runtime",
+      "evidence": [
+        "artifacts/unified-packager-validation/fusion-test/result.json",
+        "artifacts/unified-packager-validation/variant-test/result.json"
+      ]
+    },
+    "alttp": {
+      "package_abi": 2,
+      "template_sha256": "940f32bfaa532c14512c9b7c85e73c5fd8054bf05592acbc9ffaa6ea27c8cac8",
+      "reference_package_sha256": "b5a88e8e7c49a1791d8f21ff7e1a56685db9e3bfbd2e70cfe35d6b37c1823743",
+      "source_runtime": "artifacts/alttp-package-runtime",
+      "evidence": [
+        "artifacts/unified-packager-validation/zelda-test/result.json",
+        "artifacts/unified-packager-validation/variant-test/result.json"
+      ]
+    }
+  }
 }

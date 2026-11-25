@@ -1,0 +1,71 @@
+--- a/code/core/common/GbaSound.h
++++ b/code/core/common/GbaSound.h
+@@ -20,4 +20,9 @@
+     u8 soundCntX; // only enable flags
+     u8 masterEnable;
+     gbas_direct_channel_t directChannels[2];
++    // ARM7-owned telemetry on a separate cache line from ARM9 FIFO writes.
++    volatile u32 fifoUnderruns[2] __attribute__((aligned(32)));
++    volatile u32 sampleRequests[2];
++    volatile u32 maxMixerBacklog;
++    volatile u32 lateMixerBatches;
+ } gbas_shared_t;
+--- a/code/core/arm7/source/Sound/GbaSound7.c
++++ b/code/core/arm7/source/Sound/GbaSound7.c
+@@ -12,7 +12,7 @@
+ static u16 sSoundCntH;
+ static bool sPaused;
+ 
+-static s8 updateDirectChannel(gbas_direct_channel_t* channel, gbas_direct_channel7_t* channel7, u32 timerOverflows)
++static s8 updateDirectChannel(gbas_direct_channel_t* channel, gbas_direct_channel7_t* channel7, u32 timerOverflows, unsigned index, bool audible)
+ {
+     u32 samples = channel7->curPlaySamples;
+     // no overflows, or too many overflows
+@@ -23,6 +23,7 @@
+ 
+     for (u32 i = timerOverflows; i > 0; --i)
+     {
++        if(audible) ++gSoundSharedData->sampleRequests[index];
+         u32 readOffset = channel->readOffset;
+         u32 fifoCount = (channel->writeOffset - readOffset);
+         if (!(fifoCount & 4) && !channel->dmaRequest)
+@@ -40,6 +41,10 @@
+             samples = channel->fifo[readOffset];
+             channel7->curPlaySampleCount = 3;
+             channel->readOffset = (readOffset + 1) & 7;
++        }
++        else if(audible && channel->dmaRequest)
++        {
++            ++gSoundSharedData->fifoUnderruns[index];
+         }
+     }
+     channel7->curPlaySamples = samples;
+@@ -108,10 +113,12 @@
+             u32 soundCntH = sSoundCntH;
+             int sampA = updateDirectChannel(&gSoundSharedData->directChannels[0],
+                 &sDirectChannels[0],
+-                (soundCntH & GBA_SOUNDCNT_H_DIRECT_A_TIMER_1) ? timer1Overflows : timer0Overflows);
++                (soundCntH & GBA_SOUNDCNT_H_DIRECT_A_TIMER_1) ? timer1Overflows : timer0Overflows,
++                0, soundCntH & (GBA_SOUNDCNT_H_DIRECT_A_ENABLE_LEFT | GBA_SOUNDCNT_H_DIRECT_A_ENABLE_RIGHT));
+             int sampB = updateDirectChannel(&gSoundSharedData->directChannels[1],
+                 &sDirectChannels[1],
+-                (soundCntH & GBA_SOUNDCNT_H_DIRECT_B_TIMER_1) ? timer1Overflows : timer0Overflows);
++                (soundCntH & GBA_SOUNDCNT_H_DIRECT_B_TIMER_1) ? timer1Overflows : timer0Overflows,
++                1, soundCntH & (GBA_SOUNDCNT_H_DIRECT_B_ENABLE_LEFT | GBA_SOUNDCNT_H_DIRECT_B_ENABLE_RIGHT));
+ 
+             if (soundCntH & GBA_SOUNDCNT_H_DIRECT_A_VOLUME_FULL)
+                 sampA <<= 1;
+--- a/code/core/arm7/source/Sound/SoundThread.c
++++ b/code/core/arm7/source/Sound/SoundThread.c
+@@ -42,6 +42,11 @@
+         int difference = (u16)(playbackSampleCount - (u16)(sSamplePosition / 4));
+         difference *= 4;
++        // Diagnostic only: the writer starts half a ring ahead of playback.
++        if ((u32)difference > gSoundSharedData->maxMixerBacklog)
++            gSoundSharedData->maxMixerBacklog = difference;
++        if (difference >= SOUND_BUFFER_SIZE / 2)
++            ++gSoundSharedData->lateMixerBatches;
+         while (difference-- > 0)
+         {
+             gbas_updateMixer(&sSoundBufferLeft[sSoundBufferWritePtr], &sSoundBufferRight[sSoundBufferWritePtr]);
+             sSoundBufferWritePtr = (sSoundBufferWritePtr + 1) % SOUND_BUFFER_SIZE;

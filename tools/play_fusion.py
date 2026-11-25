@@ -12,7 +12,7 @@ from package_fusion import ROOT, DATA_ROOT, inspect_package
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--package',type=Path,default=ROOT/'artifacts/packages/Fusion.nds')
+    p.add_argument('--package',type=Path,default=ROOT/'artifacts/menu-banners-ds/Fusion.nds')
     p.add_argument('--prepare-only',action='store_true')
     args=p.parse_args()
     package=args.package.resolve()

@@ -1,0 +1,42 @@
+{
+  "fusion": [
+    {
+      "start": 0,
+      "end": 160,
+      "name": "boot header",
+      "sha256": "c4f82b8e0e11352ced18d749f5b44a318e7ad0036230b8828778aba6b5043d1b"
+    },
+    {
+      "start": 192,
+      "end": 1048576,
+      "name": "engine code and layout",
+      "sha256": "2af9c435934fe24f08b6d1615239d32fb1b775c739f00132db63b11f005477b4"
+    }
+  ],
+  "alttp": [
+    {
+      "start": 0,
+      "end": 160,
+      "name": "boot header",
+      "sha256": "c4f82b8e0e11352ced18d749f5b44a318e7ad0036230b8828778aba6b5043d1b"
+    },
+    {
+      "start": 192,
+      "end": 1277952,
+      "name": "engine and item-dispatch code",
+      "sha256": "29b9fbd1e918eedf54a35d2c5efd6d43a8261275f7577f51873925c9e2d65d6a"
+    },
+    {
+      "start": 1488296,
+      "end": 1499140,
+      "name": "inventory adapter tables",
+      "sha256": "c1cb525d2f9803a734c6084c1ad9ab8d51eca879effae8784a5d173ee4c48ff6"
+    },
+    {
+      "start": 1502464,
+      "end": 1506848,
+      "name": "map adapter tables",
+      "sha256": "3e81f4eb2a86a1e88145785e1f93a8aadb760d451d13e8dd9a453613f1057df6"
+    }
+  ]
+}

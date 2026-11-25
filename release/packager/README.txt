@@ -1,50 +1,58 @@
-fusion-pack 0.1.0 — local preview
+gba-ds-pack 0.2.0 — preview
 
-Create a dual-screen Fusion NDS using your own game ROM and GBA BIOS.
-The executable includes the enhanced GBARunner3 runtime. It works offline;
-you do not need Python, Docker, an emulator, or a compiler.
+One executable creates DS packages for Metroid Fusion and Zelda: A Link to
+the Past & Four Swords (ALttP adventure). Supply your own ROM and GBA BIOS.
+No Python, Docker, emulator or compiler installation is needed. Works offline.
+No game ROM, game graphics or BIOS is included.
 
-Supported game: Metroid Fusion (USA), original revision, 8 MiB.
-ROM SHA-1: ca33f4348c2c05dd330d37b97e2c5a69531dfe87
-BIOS: original 16 KiB GBA BIOS, either .bin or a ZIP containing one such file.
-No game ROM or BIOS is distributed with this tool.
+USAGE (Apple Silicon macOS)
 
-USAGE
+  ./gba-ds-pack "Metroid Fusion (USA).gba" --bios bios.bin -o Fusion.nds
+  ./gba-ds-pack "Zelda ALttP (USA).gba" --bios bios.bin -o Zelda.nds
 
-  ./fusion-pack "Metroid Fusion (USA).gba" --bios bios.bin -o Fusion.nds
+The game is detected by SHA-1. Both supported originals are US revision 0,
+8 MiB. Run --list-games to see the exact hashes. The original 16 KiB GBA BIOS
+can be a .bin or ZIP containing exactly one such file.
 
-Choose any destination folder with -o, including paths containing spaces.
-Without -o, the file is saved as Fusion.nds in your current directory.
-Existing files are never overwritten. Choose another output name to rebuild.
-The original ROM and BIOS are only read, never modified.
-The included runtime is the validated Hardware Test 5 build; that name briefly
-appears during DS startup before the game and map.
+EXPERIMENTAL VARIANTS
 
-  ./fusion-pack --help
-  ./fusion-pack --list-games
-  ./fusion-pack --inspect Fusion.nds
+  ./gba-ds-pack "Zelda variant.gba" --bios bios.bin --game alttp --allow-unsupported-rom -o Zelda.nds
 
-Use --json for machine-readable output, or --manifest to also save a build
-report alongside the NDS. Exit codes: 0 success, 1 validation/file error,
-2 command-line usage error, 130 cancellation.
+Use --game fusion for Fusion variants. Unknown hashes are rejected by default.
+The override still checks game, region, revision, size, header and protected
+adapter code/data. Zelda graphics used by the adapter also have bounds checks.
+It does not support arbitrary hacks, expanded ROMs, other regions or revisions.
+Passing these checks is not a compatibility guarantee. Some cosmetic or text
+variants may work; engine/inventory changes are deliberately rejected.
 
-ON THE DS
+Each distinct ROM SHA-1 has separate extracted files and saves. An experimental
+variant never automatically imports the original game's save. Integrity checks
+still verify the actual supplied ROM during extraction and on subsequent boots.
 
-Copy the generated file to the flashcart SD root as Fusion.nds. A compatible
-DLDI flashcart launcher and writable SD card are required. Leave about 9 MiB
-free beyond the NDS itself for extraction. The first launch extracts the game
-and BIOS; later launches reuse them. Keep the _fusion folder and existing
-saves when replacing the NDS. Saves stay on the flashcart SD, separate from
-the generated NDS. No emulator is needed on the Mac to create the package.
+OUTPUT AND DS USE
 
-PLATFORM AND RELEASE STATUS
+Use -o to choose any destination. Defaults are Fusion.nds or Zelda.nds in your
+current directory. Existing output files are never overwritten; inputs are read
+only. --manifest writes a build report; --json prints machine-readable results.
+--inspect FILE.nds verifies a package. --help lists all options.
+Exit codes: 0 success, 1 input/file error, 2 usage error, 130 cancellation.
 
-This build targets Apple Silicon macOS. It has an ad-hoc code signature for
-local testing; it is not Developer ID signed or Apple-notarized. Intel Macs,
-Windows and Linux need separate builds and validation.
+Copy the generated NDS to the flashcart SD root as Fusion.nds or Zelda.nds.
+A compatible DLDI launcher and writable SD are required. Leave about 9 MiB extra
+free for extraction. Later launches verify and reuse the extracted files.
+Keep _fusion and _alttp when replacing packages. Saves live at:
 
-This is a local preview, not a cleared public release. GBARunner3/libtwl
-redistribution terms, remaining runtime dependency notices, project licensing,
-and Apple signing/notarization must be resolved before public distribution.
-See THIRD_PARTY_NOTICES.txt. Do not redistribute an NDS containing your ROM
-and BIOS as part of the packager release.
+  _fusion/<actual ROM SHA-1>/rom.sav
+  _alttp/<actual ROM SHA-1>/rom.sav
+
+Verified originals retain their previous save paths. Do not redistribute your
+generated NDS; it contains your game and BIOS.
+
+RELEASE STATUS
+
+Apple Silicon build: ad-hoc signed, not Developer ID signed or notarized.
+Windows x64 has a separate executable. Local packaging tests run under Wine;
+CI tests the ROM-free CLI on native Windows. Game-package acceptance with user
+inputs and Authenticode signing remain outstanding.
+Redistribution terms and project licensing remain unresolved as described in
+THIRD_PARTY_NOTICES.txt. This is a preview; the documented licensing findings remain unresolved.

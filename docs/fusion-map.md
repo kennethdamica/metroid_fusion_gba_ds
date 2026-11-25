@@ -72,6 +72,10 @@ The former `0x0300001F` demo guard was sticky after an attract-mode demo. The ad
 
 ## Current validation
 
+The subsequent sound update services pending audio refills during the top-screen
+copy and map work. See [display/audio timing](display-audio.md) for the candidate
+build and its validation. The hardware-confirmed package below is preserved.
+
 Hardware Test 5 (`artifacts/hardware-test-5/Fusion.nds`) and the canonical
 `artifacts/packages/Fusion.nds` are identical: SHA-256
 `245d9b92dffb48f854a9e2bd0f466c03b3f217c4f540950a5a284a6d12fd8505`,

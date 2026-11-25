@@ -11,6 +11,8 @@ import subprocess
 import sys
 import tempfile
 from package_fusion import ROOT, build, read_bios
+from game_profiles import ALTTP, FUSION
+from fusion_pack import VERSION, runtime_directory
 
 
 def main():
@@ -39,11 +41,11 @@ def main():
                                   text=True,capture_output=True,timeout=60)
             check('no_traceback_'+str(len(checks)), 'Traceback' not in result.stderr)
             return result
-        check('version_without_Python_PATH', run('--version').stdout.strip()=='fusion-pack 0.1.0')
-        check('help', 'Create a dual-screen Fusion NDS' in run('--help').stdout)
+        check('version_without_Python_PATH', run('--version').stdout.strip()==f'gba-ds-pack {VERSION}')
+        check('help', 'Create a DS package' in run('--help').stdout)
         check('missing_arguments_exit_2', run().returncode==2)
         listing=run('--list-games','--json')
-        check('supported_revision_list', listing.returncode==0 and len(json.loads(listing.stdout))==1)
+        check('supported_revision_list', listing.returncode==0 and len(json.loads(listing.stdout))==2)
         destination=folder/'My output — DS 日本語'/'Fusion.nds'
         made=run(rom,'--bios',bios,'-o',destination,'--json')
         check('standalone_generates_NDS',made.returncode==0 and destination.is_file())
@@ -54,7 +56,7 @@ def main():
         build(ROOT/'artifacts/hardware-runtime',rom,bios,expected,write_manifest=False)
         check('exact_match_with_reference_builder',destination.read_bytes()==expected.read_bytes())
         lock=json.loads((ROOT/'release/packager/runtime-lock.json').read_text())
-        check('matches_gameplay_validated_release',sha(destination)==lock['reference_package_sha256'])
+        check('matches_gameplay_validated_release',sha(destination)==lock['games']['fusion']['reference_package_sha256'])
         check('reports_user_destination',json.loads(made.stdout)['output']==str(destination))
         check('DS_paths_use_forward_slashes',all('\\' not in json.loads(made.stdout)[key]
               for key in ('data_directory','save_path')))
@@ -84,6 +86,31 @@ def main():
         check('unwritable_destination_explained',run(rom,'--bios',bios,'-o',blocker/'Fusion.nds').returncode==1)
         check('input_files_preserved',all(sha(path)==before[path.name] for path in (rom,bios,plain)))
         check('no_temporary_output_files',not list(folder.rglob('*.tmp')))
+        zelda=folder/'My Zelda ROM.gba'
+        shutil.copy2(ROOT/'Legend of Zelda, The - A Link to the Past & Four Swords (USA).gba',zelda)
+        zelda_before=sha(zelda)
+        zelda_output=folder/'Zelda.nds'
+        made_zelda=run(zelda,'--bios',bios,'-o',zelda_output,'--json')
+        check('Zelda_detected_and_packaged',made_zelda.returncode==0 and json.loads(made_zelda.stdout)['game']=='alttp')
+        check('Zelda_matches_gameplay_validated_release',sha(zelda_output)==lock['games']['alttp']['reference_package_sha256'])
+        check('Zelda_inspect_detects_profile',json.loads(run('--inspect',zelda_output,'--json').stdout)['game']=='alttp')
+        check('explicit_wrong_game_rejected',run(zelda,'--bios',bios,'--game','fusion','-o',bad).returncode==1)
+        for profile, original in ((FUSION,rom),(ALTTP,zelda)):
+            variant=folder/(profile.key+'-variant.gba')
+            changed=bytearray(original.read_bytes());changed[-1]^=1;variant.write_bytes(changed)
+            target=folder/(profile.key+'-variant.nds')
+            check(profile.key+'_unknown_hash_rejected',run(variant,'--bios',bios,'-o',target).returncode==1 and not target.exists())
+            check(profile.key+'_override_needs_game',run(variant,'--bios',bios,'--allow-unsupported-rom','-o',target).returncode==2)
+            allowed=run(variant,'--bios',bios,'--game',profile.key,'--allow-unsupported-rom','-o',target,'--json')
+            check(profile.key+'_override_builds',allowed.returncode==0 and target.exists())
+            info=json.loads(allowed.stdout)
+            check(profile.key+'_warning_on_stderr', 'WARNING: Experimental' in allowed.stderr)
+            check(profile.key+'_isolated_variant_save',info['experimental'] and info['save_path']==f'{profile.directory}/{hashlib.sha1(changed).hexdigest()}/rom.sav')
+            check(profile.key+'_inspect_experimental',json.loads(run('--inspect',target,'--json').stdout)['experimental'])
+            changed[0x100]^=1;variant.write_bytes(changed)
+            blocked=run(variant,'--bios',bios,'--game',profile.key,'--allow-unsupported-rom','-o',bad)
+            check(profile.key+'_incompatible_code_rejected',blocked.returncode==1 and not bad.exists() and 'adapter layout' in blocked.stderr)
+        check('Zelda_input_preserved',sha(zelda)==zelda_before)
         shutil.copy2(destination,output/'Fusion.nds')
         (output/'generated-report.json').write_text(made.stdout)
     # Inspect the frozen data, rather than relying solely on the distribution size.
@@ -92,12 +119,19 @@ def main():
     members=list(archive.toc)
     normalized={name.replace('\\','/'):name for name in members}
     runtime=[name for name in normalized if name.startswith('runtime/')]
-    check('bundled_runtime_allowlist',sorted(runtime)==['runtime/manifest.json','runtime/sdcard/FusionTemplate.nds'])
-    check('bundled_template_matches',archive.extract(normalized['runtime/sdcard/FusionTemplate.nds']) ==
-          (ROOT/'artifacts/hardware-runtime/sdcard/FusionTemplate.nds').read_bytes())
+    expected_runtime = [f'runtime/{profile.key}/{name}' for profile in (FUSION,ALTTP)
+                        for name in ('manifest.json', 'sdcard/'+profile.template)]
+    check('bundled_runtime_allowlist',sorted(runtime)==sorted(expected_runtime))
+    for profile in (FUSION,ALTTP):
+        check(profile.key+'_bundled_template_matches',
+              archive.extract(normalized[f'runtime/{profile.key}/sdcard/{profile.template}']) ==
+              (runtime_directory(profile)/'sdcard'/profile.template).read_bytes())
+    check('bundled_compatibility_rules',archive.extract(normalized['rom_compatibility.json']) ==
+          (ROOT/'tools/rom_compatibility.json').read_bytes())
     check('no_game_or_BIOS_members',not any(name.lower().endswith(('.gba','bios.bin','bios.zip')) for name in members))
     # Inspect every outer payload for exact supplied game/BIOS content hashes.
     prohibited={hashlib.sha256((ROOT/'Metroid Fusion (USA).gba').read_bytes()).hexdigest(),
+                hashlib.sha256((ROOT/'Legend of Zelda, The - A Link to the Past & Four Swords (USA).gba').read_bytes()).hexdigest(),
                 hashlib.sha256(read_bios(ROOT/'gba_bios.zip')).hexdigest()}
     check('no_proprietary_payload_bytes',not any(hashlib.sha256(archive.extract(name)).hexdigest() in prohibited
           for name in members if archive.toc[name][-1]!='o'))

@@ -1,96 +1,97 @@
-# Put the project on GitHub
+# GitHub publishing and automated releases
 
-These steps publish the source repository. The local folder is not yet a Git
-repository. Run the commands from its root; do not upload the whole folder
-through a browser or force-add ignored files.
+The source repository is
+[kennethdamica/metroid_fusion_gba_ds](https://github.com/kennethdamica/metroid_fusion_gba_ds).
+The project now supports Fusion and Zelda under the **GBA DS** name; the existing
+repository URL is retained.
 
-## 1. Create an empty repository
+## Push source changes
 
-On GitHub, select **New repository** and choose a name such as `fusion-ds`.
-Select **Public** if that is your intended visibility. Leave the options to add
-a README, `.gitignore` and license unchecked: local documentation and ignore
-rules are already prepared, and no blanket project license has been selected.
-
-Copy the HTTPS repository URL from GitHub's setup page.
-
-## 2. Initialize, check and commit locally
+From the repository root:
 
 ```sh
-git init -b main
-git add .
 python3 tools/check_repository.py
 python3 -m unittest discover -s tests/public -v
+git status --short
+git add README.md docs tools runtime patches tests release .github .gitattributes
 git diff --cached --stat
 git diff --cached --name-only
+git commit -m "Describe the change"
+git push origin main
 ```
 
-Review the staged list. It should contain source, documentation, patches,
-license notices and GitHub configuration. ROMs, BIOS files, generated NDS files,
-saves, `vendor/`, `.tools/`, `.venv/` and `artifacts/` should not be staged.
-The checker also detects private files already tracked despite ignore rules.
-Stop and correct any checker failures before committing.
+Review the staged paths. They should contain source, documentation, tests,
+patches and notices. Never force-add ignored ROMs, BIOS files, saves, generated
+NDS files, `vendor/`, `.tools/`, `.venv/` or `artifacts/`. The checker also flags
+private files already tracked despite ignore rules. Keep local input files on
+your Mac; neither source CI nor release builds require them.
 
-Then commit:
+## What CI does
+
+[Source checks](../.github/workflows/source-checks.yml) runs on pushes and pull
+requests. [Build packagers](../.github/workflows/release.yml) runs on `main`,
+version tags and manual dispatch:
+
+1. Build pinned upstream GBARunner3 and both enhanced DS runtimes on Ubuntu
+   using the pinned devkitARM image.
+2. Require exact matches with `release/packager/runtime-lock.json` and verify
+   the runtime source hashes. Transfer only the two templates and manifests.
+3. Freeze one executable on native Windows x64 and one on Apple Silicon macOS.
+4. Run public tests and the actual frozen CLI from an isolated directory with
+   an empty PATH. Audit the executable's bundled runtime files.
+5. Audit the two ZIPs, provenance and license notices, then generate `SHA256SUMS`.
+6. On a version-tag push only, publish the tested ZIPs/checksums as a GitHub
+   **prerelease**. Ordinary `main` pushes and manual runs produce Actions
+   artifacts without publishing a release.
+
+The `public-release` Actions artifact contains both platform ZIPs and checksums.
+Build artifacts expire after 30 days; published release assets remain attached
+to their release. No game ROM, BIOS, save, memory dump or game-containing NDS is
+uploaded by these workflows.
+
+GitHub supplies the workflow token automatically. Only the publish job has
+`contents: write`; build jobs have read-only permissions. No personal token,
+ROM secret or signing certificate is required. Actions are pinned by commit SHA.
+
+## Publish a version
+
+Update `VERSION` in `tools/fusion_pack.py`, the version assertion in the public
+CLI test, and the usage documents. Update release notes if appropriate. If a
+runtime changes, complete local gameplay/save tests before updating its lock;
+do not bypass the lock to make CI green.
+
+Commit/push those changes and wait for **Build packagers** to pass on `main`.
+Then tag that tested commit, using the exact CLI version (example: `0.2.0`):
 
 ```sh
-git commit -m "Initial Fusion DS source import"
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
-If Git asks for your identity, configure it for this repository and retry:
+The tag workflow rebuilds and retests before publishing. Tag and CLI version
+must agree. A failed build never publishes a release. Publication starts with
+a draft and only makes it public after uploading all assets. Rerunning a failed
+publication may complete that draft; an already published release is never
+replaced. Do not move an existing version tag: fix the source and publish a new
+version instead.
 
-```sh
-git config user.name "Your Name"
-git config user.email "YOUR_GITHUB_COMMIT_EMAIL"
-```
+The outputs are `gba-ds-pack-VERSION-macos-arm64-preview.zip`,
+`gba-ds-pack-VERSION-windows-x86_64-preview.zip`, and `SHA256SUMS`. Generated
+executables belong in release assets, not Git history.
 
-You can use the exact GitHub-provided no-reply address shown in your account's
-email settings instead of a personal address.
+## Test limits
 
-## 3. Authenticate and push
+Hosted CI runs no copyrighted game data. Runtime hash checks connect CI builds
+to local gameplay evidence; native CLI smoke tests do not establish Windows
+game-package acceptance, DS hardware compatibility or arbitrary hack support.
+Executables remain unsigned on Windows and ad-hoc signed, without notarization,
+on macOS. See [release readiness](releasing.md) and the
+[CLI guide](packager-cli.md).
 
-If GitHub CLI is installed, `gh auth login` provides a browser-based sign-in.
-Otherwise use your configured Git credential manager or SSH setup. GitHub
-account passwords are not used for HTTPS Git authentication; see
-[GitHub authentication](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-authentication-to-github).
+The maintainer has deferred unresolved upstream-permission questions. Identified
+notices remain included; automation does not mark those questions resolved.
+See [licensing status](../LICENSING.md).
 
-Replace `YOUR_USERNAME` and the repository name below with your actual URL:
-
-```sh
-git remote add origin https://github.com/YOUR_USERNAME/fusion-ds.git
-git remote -v
-git push -u origin main
-```
-
-For an existing local repository/remote, inspect `git status` and
-`git remote -v` first rather than redoing initialization or adding `origin`.
-Do not use a force push for this initial upload.
-
-## 4. Check the GitHub page
-
-Confirm the README renders and the **Actions → Source checks** jobs run on
-Ubuntu and Windows. Those jobs verify source and public CLI tests; they do not
-establish gameplay, hardware or frozen-executable compatibility.
-
-Suggested description: “Dual-screen Metroid Fusion for DS-family hardware,
-with a live map and a local ROM-to-NDS packager.” Add a download link to the
-README only after a release asset exists.
-
-## Optional: share packager previews separately
-
-Use GitHub **Releases** for standalone executable ZIPs, rather than committing
-binaries to the source tree. Refreshed local preview ZIPs and checksums are in
-`artifacts/packager-with-notices/`. They contain the same previously tested
-executables, with additional notices and a packaging record. The original
-build manifests remain intact and describe the executable build.
-
-If you choose to publish them, mark the release as a **pre-release** and state
-the current unsigned/native-Windows testing limits. Upload only the two named
-platform ZIPs and `SHA256SUMS`, never the whole `artifacts/` directory or a
-generated `Fusion.nds`. Keep the documented licensing status factual; the
-notice update is not a determination that unknown permissions are resolved.
-
-The upstream-permission questions are deferred by the maintainer; no request
-has been sent. Known notices and scoped GPL patch attribution are retained.
-See [licensing status](../LICENSING.md) for the precise scope.
-
-These steps follow [GitHub's existing-project import guide](https://docs.github.com/en/migrations/importing-source-code/using-the-command-line-to-import-source-code/adding-locally-hosted-code-to-github).
+Workflow behavior follows GitHub's documentation for
+[hosted runner platforms](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+and [artifact transfers](https://github.com/actions/download-artifact).

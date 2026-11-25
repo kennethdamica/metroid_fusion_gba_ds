@@ -1,5 +1,27 @@
 # Troubleshooting
 
+## The DS extractor reports a payload hash mismatch
+
+The filename above the error identifies the payload being read from the NDS.
+This check happens before the extracted temporary file is installed. The
+message's suggestion to rebuild does not establish that the Mac package is
+bad: a damaged copy or a flashcart/SD read problem can also cause it.
+
+Replace the NDS on the SD card with the verified local package, retaining the
+existing `_alttp` or `_fusion` folder and its separate save. Safely eject the
+card before removing it. Do not delete the save to address this error.
+
+For Zelda, validate the actual SD-card copy on the Mac:
+
+```sh
+.venv/bin/python tools/package_alttp.py --inspect '/Volumes/CARD/Zelda.nds'
+```
+
+Substitute the mounted card's name. Compare the reported package SHA-256 with
+the original package's manifest. If the SD copy is valid but the DS still
+rejects it, retain both files and the exact error/filename for a flashcart read
+investigation; another identical rebuild alone will not resolve that cause.
+
 ## The packager rejects my input
 
 Only original-revision **Metroid Fusion (USA)** is supported. Its SHA-1 is
